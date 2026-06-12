@@ -1,0 +1,21 @@
+{
+  "name": "nichescope",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "scrape:profile": "bun run src/scraper/instagram.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/express": "^5.0.6",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "mongoose": "^9.7.0",
+    "playwright": "^1.60.0"
+  }
+}

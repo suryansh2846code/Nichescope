@@ -8,11 +8,14 @@
     "dev": "bun --watch src/index.ts",
     "scrape:profile": "bun run src/scraper/instagram.ts",
     "worker:scrape": "bun run src/workers/scrapeWorker.ts",
-    "worker": "bun run src/workers/scrapeWorker.ts"
+    "worker": "bun run src/workers/scrapeWorker.ts",
+    "frontend": "bun --hot src/frontend/server.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/express": "^5.0.6",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "typescript": "^5"
   },
   "dependencies": {
@@ -20,6 +23,8 @@
     "express": "^5.2.1",
     "ioredis": "^5.11.1",
     "mongoose": "^9.7.0",
-    "playwright": "^1.60.0"
+    "playwright": "^1.60.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   }
 }

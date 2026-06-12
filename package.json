@@ -7,7 +7,8 @@
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
     "scrape:profile": "bun run src/scraper/instagram.ts",
-    "worker:scrape": "bun run src/workers/scrapeWorker.ts"
+    "worker:scrape": "bun run src/workers/scrapeWorker.ts",
+    "worker": "bun run src/workers/scrapeWorker.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

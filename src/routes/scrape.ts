@@ -16,14 +16,11 @@ router.post("/", async (req, res, next) => {
       return;
     }
 
-    if (!niche || typeof niche !== "string") {
-      res.status(400).json({ error: "niche is required" });
-      return;
-    }
+    const targetNiche = typeof niche === "string" && niche.trim() !== "" ? niche.trim() : "general";
 
     const job = await scrapeQueue.add(SCRAPE_PROFILE_JOB_NAME, {
       username: username.replace(/^@/, "").trim(),
-      niche: niche.trim(),
+      niche: targetNiche,
       maxFollowers:
         typeof maxFollowers === "number" && maxFollowers > 0
           ? maxFollowers

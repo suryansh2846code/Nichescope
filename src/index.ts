@@ -1,6 +1,8 @@
 import express from "express";
 import { connectToDatabase } from "./db";
+import jobsRouter from "./routes/jobs";
 import leadsRouter from "./routes/leads";
+import scrapeRouter from "./routes/scrape";
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -12,6 +14,8 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/leads", leadsRouter);
+app.use("/scrape", scrapeRouter);
+app.use("/jobs", jobsRouter);
 
 app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (res.headersSent) {

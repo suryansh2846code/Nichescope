@@ -53,4 +53,20 @@ Phase 3 scraper:
 bun run scrape:profile yoga_with_adriene
 ```
 
+Phase 4 queue:
+
+```bash
+bun run worker:scrape
+
+curl -X POST http://localhost:3000/scrape \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "instagram",
+    "niche": "social",
+    "maxFollowers": 100
+  }'
+
+curl http://localhost:3000/jobs/<job-id>
+```
+
 This project was created using `bun init` in bun v1.3.14. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.

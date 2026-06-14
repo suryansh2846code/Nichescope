@@ -1,0 +1,195 @@
+import { Worker } from "bullmq";
+import { connectToDatabase } from "../db";
+import { createRedisConnectionOptions } from "../queues/redis";
+import { USER_INTELLIGENCE_QUEUE_NAME, type UserIntelligenceJobData } from "../queues/userIntelligenceQueue";
+import { PostAnalysis } from "../models/PostAnalysis";
+import { Post } from "../models/Post";
+import { UserIntelligence } from "../models/UserIntelligence";
+import { getAIProvider } from "../services/ai/AIProvider";
+
+// Connect to MongoDB
+try {
+  await connectToDatabase();
+} catch (error) {
+  console.error(
+    `Failed to connect to MongoDB in User Intelligence worker: ${error instanceof Error ? error.message : String(error)}`
+  );
+  process.exit(1);
+}
+
+const provider = getAIProvider();
+
+export async function processUserIntelligenceJob(job: {
+  data: UserIntelligenceJobData;
+  updateProgress: (progress: number) => Promise<any>;
+}) {
+  const { username } = job.data;
+  const normalizedUser = username.toLowerCase().trim();
+  console.log(`Starting User Intelligence aggregation for @${normalizedUser}`);
+  await job.updateProgress(10);
+
+  // 1. Load all PostAnalysis records for user
+  const analyses = await PostAnalysis.find({ username: normalizedUser });
+  if (analyses.length === 0) {
+    console.log(`No post analyses found for @${normalizedUser}. Skipping user aggregation.`);
+    await job.updateProgress(100);
+    return { username: normalizedUser, status: "skipped", reason: "no_analyses" };
+  }
+  await job.updateProgress(30);
+
+  // 2. Fetch corresponding Posts to get captions and timestamps
+  const postIds = analyses.map((a) => a.postId);
+  const posts = await Post.find({ postId: { $in: postIds } });
+  const postsMap = new Map(posts.map((p) => [p.postId, p]));
+
+  // 3. Aggregate category and intent distributions
+  const categoryCounts: Record<string, number> = {};
+  const intentCounts: Record<string, number> = {};
+  let totalConfidence = 0;
+  let totalPostLeadScore = 0;
+  let leadPostCount = 0;
+
+  for (const analysis of analyses) {
+    // Category distribution
+    const cat = analysis.category || "general";
+    categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+
+    // Intent distribution
+    const intent = analysis.intent || "other";
+    intentCounts[intent] = (intentCounts[intent] || 0) + 1;
+
+    totalConfidence += analysis.confidence || 0;
+    totalPostLeadScore += analysis.leadScore || 0;
+    if (analysis.isLead) {
+      leadPostCount++;
+    }
+  }
+
+  // Determine dominant overallCategory and overallIntent
+  const categoriesList = Object.entries(categoryCounts).map(([category, count]) => ({
+    category,
+    count,
+  }));
+  categoriesList.sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+  const overallCategory = categoriesList[0]?.category || "general";
+
+  const intentsList = Object.entries(intentCounts).map(([intent, count]) => ({
+    intent,
+    count,
+  }));
+  intentsList.sort((a, b) => b.count - a.count || a.intent.localeCompare(b.intent));
+  const overallIntent = intentsList[0]?.intent || "other";
+
+  const averageConfidence = totalConfidence / analyses.length;
+  const averagePostLeadScore = totalPostLeadScore / analyses.length;
+
+  await job.updateProgress(50);
+
+  // 4. Lead Score Calculation
+  let score = 0;
+  score += averagePostLeadScore * 0.5;
+  if (leadPostCount >= 3) {
+    score += 20;
+  }
+  if (overallIntent === "seeking_help" || overallIntent === "seeking_recommendation") {
+    score += 15;
+  }
+  if (averageConfidence > 90) {
+    score += 15;
+  }
+  const finalLeadScore = Math.max(0, Math.min(100, Math.round(score)));
+
+  // 5. Generate AI User Summary
+  // Sort posts by date to get most recent ones first
+  const sortedAnalyses = [...analyses].sort((a, b) => {
+    const pA = postsMap.get(a.postId);
+    const pB = postsMap.get(b.postId);
+    const dA = pA?.postedAt || a.analyzedAt || (a as any).createdAt || new Date(0);
+    const dB = pB?.postedAt || b.analyzedAt || (b as any).createdAt || new Date(0);
+    return new Date(dB).getTime() - new Date(dA).getTime(); // Newest first
+  });
+
+  // Extract captions for AI summary (up to 10 most recent posts, truncated to 300 chars)
+  const summaryInputs: string[] = [];
+  for (const analysis of sortedAnalyses.slice(0, 10)) {
+    const post = postsMap.get(analysis.postId);
+    const captionText = post?.caption || analysis.summary || "";
+    if (captionText.trim()) {
+      summaryInputs.push(captionText.slice(0, 300).trim());
+    }
+  }
+
+  // Call AI provider
+  const summary = await provider.generateUserSummary(summaryInputs);
+  await job.updateProgress(80);
+
+  // 6. Determine firstSeenAt and lastSeenAt
+  let firstSeenAt: Date | undefined;
+  let lastSeenAt: Date | undefined;
+
+  const dates = analyses
+    .map((a) => {
+      const post = postsMap.get(a.postId);
+      return post?.postedAt || a.analyzedAt || (a as any).createdAt;
+    })
+    .filter(Boolean)
+    .map((d) => new Date(d));
+
+  if (dates.length > 0) {
+    firstSeenAt = new Date(Math.min(...dates.map((d) => d.getTime())));
+    lastSeenAt = new Date(Math.max(...dates.map((d) => d.getTime())));
+  }
+
+  // 7. Save or Update UserIntelligence
+  const userIntel = await UserIntelligence.findOneAndUpdate(
+    { username: normalizedUser },
+    {
+      username: normalizedUser,
+      overallCategory,
+      overallIntent,
+      confidence: averageConfidence,
+      leadScore: finalLeadScore,
+      summary: summary.slice(0, 250), // Ensure strict 250 character limit
+      postCountAnalyzed: analyses.length,
+      leadPostCount,
+      categories: categoriesList,
+      intents: intentsList,
+      firstSeenAt,
+      lastSeenAt,
+      analyzedAt: new Date(),
+    },
+    { upsert: true, returnDocument: "after" }
+  );
+
+  await job.updateProgress(100);
+  console.log(
+    `Finished User Intelligence aggregation for @${normalizedUser}. Score: ${finalLeadScore}, Dominant Category: ${overallCategory}`
+  );
+
+  return {
+    username: normalizedUser,
+    overallCategory,
+    overallIntent,
+    leadScore: finalLeadScore,
+    status: "success",
+  };
+}
+
+const worker = new Worker<UserIntelligenceJobData>(
+  USER_INTELLIGENCE_QUEUE_NAME,
+  processUserIntelligenceJob,
+  {
+    connection: createRedisConnectionOptions(),
+    concurrency: 1,
+  }
+);
+
+worker.on("completed", (job) => {
+  console.log(`User Intelligence aggregation job ${job.id} completed`);
+});
+
+worker.on("failed", (job, error) => {
+  console.error(`User Intelligence aggregation job ${job?.id ?? "unknown"} failed: ${error.message}`);
+});
+
+console.log(`User Intelligence worker listening on "${USER_INTELLIGENCE_QUEUE_NAME}" queue`);

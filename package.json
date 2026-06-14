@@ -11,6 +11,7 @@
     "worker": "bun run src/workers/scrapeWorker.ts",
     "worker:discover": "bun run src/workers/hashtagDiscoveryWorker.ts",
     "worker:analyze": "bun run src/workers/aiAnalysisWorker.ts",
+    "worker:user": "bun run src/workers/userIntelligenceWorker.ts",
     "frontend": "bun --hot src/frontend/server.ts"
   },
   "devDependencies": {

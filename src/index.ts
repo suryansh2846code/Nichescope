@@ -5,6 +5,7 @@ import leadsRouter from "./routes/leads";
 import scrapeRouter from "./routes/scrape";
 import discoverRouter from "./routes/discover";
 import analysisRouter from "./routes/analysis";
+import usersRouter from "./routes/users";
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -31,6 +32,7 @@ app.use("/scrape", scrapeRouter);
 app.use("/jobs", jobsRouter);
 app.use("/discover", discoverRouter);
 app.use("/analysis", analysisRouter);
+app.use("/users", usersRouter);
 
 app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (res.headersSent) {

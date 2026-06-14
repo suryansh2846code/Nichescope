@@ -1,6 +1,7 @@
 import { Router } from "express";
 import mongoose from "mongoose";
 import { Lead } from "../models/Lead";
+import { Post } from "../models/Post";
 
 const router = Router();
 
@@ -58,6 +59,25 @@ router.get("/:id", async (req, res, next) => {
     }
 
     res.json(lead);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/:username/posts", async (req, res, next) => {
+  try {
+    const { username } = req.params;
+
+    if (!username) {
+      res.status(400).json({ error: "username is required" });
+      return;
+    }
+
+    const posts = await Post.find({
+      username: new RegExp(`^${username.replace(/^@/, "").trim()}$`, "i"),
+    }).sort({ postedAt: -1 });
+
+    res.json(posts);
   } catch (error) {
     next(error);
   }

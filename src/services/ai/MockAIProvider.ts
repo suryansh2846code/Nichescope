@@ -74,4 +74,34 @@ export class MockAIProvider implements AIProvider {
       summary,
     };
   }
+
+  async generateUserSummary(captions: string[]): Promise<string> {
+    if (captions.length === 0) {
+      return "No posts available to summarize.";
+    }
+
+    const text = captions.join(" ").toLowerCase();
+    let detectedCategory = "general topics";
+    let behavior = "discusses general topics";
+
+    if (text.includes("acne") || text.includes("dermatologist") || text.includes("skin")) {
+      detectedCategory = "acne-related issues and skincare";
+      behavior = "is actively seeking dermatologist recommendations and struggling with skin health";
+    } else if (text.includes("fitness") || text.includes("gym") || text.includes("workout") || text.includes("yoga")) {
+      detectedCategory = "fitness and workout routines";
+      behavior = "is seeking recommendations for local gyms, yoga studios, or trainers";
+    } else if (text.includes("house") || text.includes("rent") || text.includes("apartment")) {
+      detectedCategory = "housing and rental search";
+      behavior = "is searching for property recommendations, rental details, or buying options";
+    } else if (text.includes("makeup") || text.includes("beauty")) {
+      detectedCategory = "beauty and makeup products";
+      behavior = "regularly reviews skincare, beauty accessories, and makeup routines";
+    } else if (text.includes("software") || text.includes("coding") || text.includes("programming")) {
+      detectedCategory = "software engineering and programming languages";
+      behavior = "discusses tech trends, programming advice, and development tools";
+    }
+
+    const summary = `User repeatedly discusses ${detectedCategory} and ${behavior}.`;
+    return summary.slice(0, 250);
+  }
 }

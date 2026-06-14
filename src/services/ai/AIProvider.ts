@@ -9,6 +9,7 @@ export interface AnalysisResult {
 
 export interface AIProvider {
   analyzeCaption(caption: string): Promise<AnalysisResult>;
+  generateUserSummary(captions: string[]): Promise<string>;
 }
 
 import { MockAIProvider } from "./MockAIProvider";

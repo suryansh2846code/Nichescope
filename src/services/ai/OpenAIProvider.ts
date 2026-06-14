@@ -103,4 +103,54 @@ Return a STRICT JSON response in this exact format, with no markdown wrappers:
       throw err;
     }
   }
+
+  async generateUserSummary(captions: string[]): Promise<string> {
+    const systemPrompt = `You are an AI lead discovery agent. Generate a concise, single-sentence summary (maximum 250 characters) summarizing the user's interests, needs, and behaviors based on their recent posts.
+Focus on lead intelligence and intent (e.g. 'User repeatedly discusses acne-related issues and is actively seeking dermatology recommendations.').
+Your response must be direct, plain text, and must strictly not exceed 250 characters.`;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.apiKey}`,
+    };
+
+    if (this.endpointUrl.includes("openrouter.ai")) {
+      headers["HTTP-Referer"] = "https://github.com/suryansh2846code/Nichescope";
+      headers["X-Title"] = "Nichescope";
+    }
+
+    try {
+      const response = await fetch(this.endpointUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: this.modelName,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: `User's recent post captions/summaries:\n${captions.map((c, i) => `${i + 1}. ${c}`).join("\n")}` },
+          ],
+          temperature: 0.3,
+          max_tokens: 150,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`LLM provider error (status ${response.status}): ${errText}`);
+      }
+
+      const resData = (await response.json()) as any;
+      const textResult = resData.choices?.[0]?.message?.content?.trim();
+
+      if (!textResult) {
+        throw new Error("Empty response content from LLM provider");
+      }
+
+      return textResult.slice(0, 250);
+    } catch (err) {
+      console.error("Failed during AI user summary generation:", err);
+      // Fallback
+      return `User has active posts. Discussed topics: ${captions.slice(0, 3).join(", ").slice(0, 150)}...`.slice(0, 250);
+    }
+  }
 }

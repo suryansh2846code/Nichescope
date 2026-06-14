@@ -6,6 +6,7 @@ import { getAIProvider } from "../services/ai/AIProvider";
 import { calculateLeadScore } from "../services/ai/scoring";
 import { PostAnalysis } from "../models/PostAnalysis";
 import { Post } from "../models/Post";
+import { userIntelligenceQueue, AGGREGATE_USER_JOB_NAME } from "../queues/userIntelligenceQueue";
 
 // Connect to MongoDB
 try {
@@ -95,6 +96,23 @@ export async function processAnalysisJob(job: {
 
   // Mark post as analyzed in Post collection
   await Post.updateOne({ postId }, { $set: { isAnalyzed: true } });
+
+  // Enqueue user intelligence aggregation task
+  try {
+    const cleanUser = username.toLowerCase();
+    await userIntelligenceQueue.add(
+      AGGREGATE_USER_JOB_NAME,
+      { username: cleanUser },
+      { jobId: cleanUser }
+    );
+    console.log(`Enqueued UserIntelligence aggregation for user @${cleanUser}`);
+  } catch (err) {
+    console.error(
+      `Failed to enqueue user intelligence job for @${username}:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+
   await job.updateProgress(100);
 
   console.log(

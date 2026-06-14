@@ -310,14 +310,137 @@ export async function scrapeProfile(
   }
 }
 
-if (import.meta.main) {
-  const username = Bun.argv[2];
+export interface DiscoveredUser {
+  username: string;
+  sourcePostUrl: string;
+}
 
-  if (!username) {
-    console.error("Usage: bun run src/scraper/instagram.ts <instagram_username>");
+export interface ScrapedHashtagResult {
+  hashtag: string;
+  discoveries: DiscoveredUser[];
+}
+
+export async function scrapeHashtag(
+  hashtag: string,
+  options: { headless?: boolean; timeoutMs?: number; maxPosts?: number } = {}
+): Promise<ScrapedHashtagResult> {
+  const cleanHashtag = hashtag.replace(/^#/, "").trim().toLowerCase();
+
+  if (!cleanHashtag) {
+    throw new Error("Hashtag is required");
+  }
+
+  const hashtagUrl = `${INSTAGRAM_BASE_URL}/explore/tags/${cleanHashtag}/`;
+  const maxPosts = Math.min(options.maxPosts ?? 50, 50);
+
+  const browser = await chromium.launch({
+    headless: options.headless ?? true,
+  });
+
+  try {
+    const page = await browser.newPage({
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    });
+
+    console.log(`Navigating to hashtag page: ${hashtagUrl}`);
+    await page.goto(hashtagUrl, {
+      waitUntil: "networkidle",
+      timeout: options.timeoutMs ?? 30_000,
+    });
+
+    // Grab post links
+    let postUrls = await page.evaluate(() => {
+      const anchors = Array.from(document.querySelectorAll('a'));
+      return anchors
+        .map(a => a.href)
+        .filter(href => href.includes('/p/') || href.includes('/reel/'))
+        .filter((value, index, self) => self.indexOf(value) === index);
+    });
+
+    // Scroll page if we need more links
+    let scrolls = 0;
+    while (postUrls.length < maxPosts && scrolls < 5) {
+      console.log(`Scrolling hashtag page... Current unique count: ${postUrls.length}`);
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForTimeout(2000);
+
+      const newUrls = await page.evaluate(() => {
+        const anchors = Array.from(document.querySelectorAll('a'));
+        return anchors
+          .map(a => a.href)
+          .filter(href => href.includes('/p/') || href.includes('/reel/'));
+      });
+
+      postUrls = [...new Set([...postUrls, ...newUrls])];
+      scrolls++;
+    }
+
+    const targetUrls = postUrls.slice(0, maxPosts);
+    console.log(`Discovered ${targetUrls.length} posts for hashtag #${cleanHashtag}. Extracting authors...`);
+
+    const discoveries: DiscoveredUser[] = [];
+    for (const url of targetUrls) {
+      try {
+        console.log(`Scraping post to discover author: ${url}`);
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+        await page.waitForTimeout(1000);
+
+        const desc = await page.evaluate(() => {
+          const getMeta = (selector: string) =>
+            document.querySelector<HTMLMetaElement>(selector)?.content || "";
+          return getMeta('meta[property="og:description"]') || getMeta('meta[name="description"]');
+        });
+
+        if (desc) {
+          const parsed = parsePostMetaDescription(desc);
+          if (parsed && parsed.username) {
+            discoveries.push({
+              username: parsed.username.toLowerCase(),
+              sourcePostUrl: url,
+            });
+          } else {
+            console.warn(`Could not extract username from description for post: ${url}`);
+          }
+        } else {
+          console.warn(`No description found for post: ${url}`);
+        }
+      } catch (err) {
+        console.error(`Failed to scrape post author from ${url}:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    // Deduplicate discoveries by username in the current batch
+    const uniqueDiscoveriesMap = new Map<string, DiscoveredUser>();
+    for (const d of discoveries) {
+      uniqueDiscoveriesMap.set(d.username, d);
+    }
+    const uniqueDiscoveries = Array.from(uniqueDiscoveriesMap.values());
+
+    console.log(`Completed hashtag discovery. Found ${uniqueDiscoveries.length} unique authors.`);
+
+    return {
+      hashtag: cleanHashtag,
+      discoveries: uniqueDiscoveries,
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+if (import.meta.main) {
+  const arg = Bun.argv[2];
+
+  if (!arg) {
+    console.error("Usage: bun run src/scraper/instagram.ts <instagram_username_or_hashtag>");
     process.exit(1);
   }
 
-  const result = await scrapeProfile(username);
-  console.log(JSON.stringify(result, null, 2));
+  if (arg.startsWith("#")) {
+    const result = await scrapeHashtag(arg);
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    const result = await scrapeProfile(arg);
+    console.log(JSON.stringify(result, null, 2));
+  }
 }

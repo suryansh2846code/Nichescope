@@ -10,6 +10,7 @@ export interface PostAttrs {
   postedAt?: Date;
   likes?: number;
   commentsCount?: number;
+  isAnalyzed?: boolean;
   scrapedAt: Date;
 }
 
@@ -63,6 +64,10 @@ const postSchema = new Schema(
     scrapedAt: {
       type: Date,
       default: Date.now,
+    },
+    isAnalyzed: {
+      type: Boolean,
+      default: false,
     },
   },
   {

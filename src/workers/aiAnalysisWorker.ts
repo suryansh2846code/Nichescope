@@ -89,6 +89,7 @@ export async function processAnalysisJob(job: {
       leadScore,
       extractedKeywords: result.keywords,
       summary: result.summary,
+      sentiment: result.sentiment || "neutral",
       analyzedAt: new Date(),
     },
     { upsert: true, returnDocument: "after" }

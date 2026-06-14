@@ -71,10 +71,22 @@ interface PostAnalysisResult {
 
 export default function App() {
   // Navigation
-  const [activeTab, setActiveTab] = useState<"pipeline" | "ai" | "user" | "search" | "monitoring">("pipeline");
+  const [activeTab, setActiveTab] = useState<"pipeline" | "ai" | "user" | "search" | "monitoring" | "market">("pipeline");
 
   // Telemetry Monitoring State
   const [monitoringConfigs, setMonitoringConfigs] = useState<any[]>([]);
+
+  // Market Intelligence State
+  const [marketOverview, setMarketOverview] = useState<any | null>(null);
+  const [marketCategories, setMarketCategories] = useState<any[]>([]);
+  const [marketIntents, setMarketIntents] = useState<any[]>([]);
+  const [marketKeywords, setMarketKeywords] = useState<any[]>([]);
+  const [marketTrends, setMarketTrends] = useState<any[]>([]);
+  const [marketEmerging, setMarketEmerging] = useState<any[]>([]);
+  const [marketMentions, setMarketMentions] = useState<any[]>([]);
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [marketError, setMarketError] = useState<string | null>(null);
+  const [triggeringMarketJob, setTriggeringMarketJob] = useState(false);
   const [trendingLeads, setTrendingLeads] = useState<any[]>([]);
   const [recentlyActive, setRecentlyActive] = useState<any[]>([]);
   const [changeEvents, setChangeEvents] = useState<any[]>([]);
@@ -346,12 +358,88 @@ export default function App() {
     }
   };
 
+  // Fetch Market Intelligence Data
+  const fetchMarketData = useCallback(async () => {
+    setMarketLoading(true);
+    setMarketError(null);
+    try {
+      const [overviewRes, categoriesRes, intentsRes, keywordsRes, trendsRes, emergingRes, mentionsRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/market/overview`),
+        fetch(`${API_BASE_URL}/market/categories`),
+        fetch(`${API_BASE_URL}/market/intents`),
+        fetch(`${API_BASE_URL}/market/keywords?limit=10`),
+        fetch(`${API_BASE_URL}/market/trends`),
+        fetch(`${API_BASE_URL}/market/emerging-topics`),
+        fetch(`${API_BASE_URL}/market/mentions`),
+      ]);
+
+      if (
+        !overviewRes.ok ||
+        !categoriesRes.ok ||
+        !intentsRes.ok ||
+        !keywordsRes.ok ||
+        !trendsRes.ok ||
+        !emergingRes.ok ||
+        !mentionsRes.ok
+      ) {
+        throw new Error("Failed to load market intelligence dataset from backend");
+      }
+
+      const [overview, categories, intents, keywords, trends, emerging, mentions] = await Promise.all([
+        overviewRes.json(),
+        categoriesRes.json(),
+        intentsRes.json(),
+        keywordsRes.json(),
+        trendsRes.json(),
+        emergingRes.json(),
+        mentionsRes.json(),
+      ]);
+
+      setMarketOverview(overview);
+      setMarketCategories(categories);
+      setMarketIntents(intents);
+      setMarketKeywords(keywords);
+      setMarketTrends(trends);
+      setMarketEmerging(emerging);
+      setMarketMentions(mentions);
+    } catch (err) {
+      setMarketError(err instanceof Error ? err.message : "Error fetching market intelligence");
+    } finally {
+      setMarketLoading(false);
+    }
+  }, []);
+
+  const handleTriggerMarketJob = async () => {
+    setTriggeringMarketJob(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/market/trigger`, { method: "POST" });
+      if (!res.ok) {
+        throw new Error("Failed to trigger market intelligence snapshot");
+      }
+      // Wait 2.5 seconds for job processing in background, then reload
+      setTimeout(() => {
+        fetchMarketData();
+        setTriggeringMarketJob(false);
+      }, 2500);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to run snapshot");
+      setTriggeringMarketJob(false);
+    }
+  };
+
   // Monitoring load and reload
   useEffect(() => {
     if (activeTab === "monitoring") {
       fetchMonitoringData();
     }
   }, [activeTab, fetchMonitoringData]);
+
+  // Market Intelligence load
+  useEffect(() => {
+    if (activeTab === "market") {
+      fetchMarketData();
+    }
+  }, [activeTab, fetchMarketData]);
 
   // Initial load and filter reload
   useEffect(() => {
@@ -578,6 +666,12 @@ export default function App() {
           onClick={() => setActiveTab("monitoring")}
         >
           📈 Lead Monitoring
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "market" ? "active" : ""}`}
+          onClick={() => setActiveTab("market")}
+        >
+          📊 Market Intelligence
         </button>
       </div>
 
@@ -2005,6 +2099,319 @@ export default function App() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === "market" && (
+        <div className="ai-dashboard animate-slide-in">
+          {/* Stats Row */}
+          <div className="ai-stats-row">
+            <div className="stat-card">
+              <span className="stat-card-label">Market Total Users</span>
+              <span className="stat-card-value">{marketOverview?.totalUsers ?? 0}</span>
+              <span className="stat-card-desc">Aggregated intelligence profiles</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-card-label">Market Total Posts</span>
+              <span className="stat-card-value">{marketOverview?.totalPosts ?? 0}</span>
+              <span className="stat-card-desc">Total post activities analyzed</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-card-label">Emerging Keywords</span>
+              <span className="stat-card-value">{marketEmerging.length}</span>
+              <span className="stat-card-desc">Keywords with &gt;50% growth rate</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-card-label">Top Mentioned Handles</span>
+              <span className="stat-card-value" style={{ fontSize: "1.1rem", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                {marketMentions.slice(0, 2).map((m) => `@${m.mention}`).join(", ") || "None"}
+              </span>
+              <span className="stat-card-desc">Most tagged Instagram accounts</span>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "2rem" }}>
+            <button
+              onClick={handleTriggerMarketJob}
+              disabled={triggeringMarketJob || marketLoading}
+              className="btn btn-primary"
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.75rem 1.5rem" }}
+            >
+              {triggeringMarketJob ? (
+                <>
+                  <span className="spinner" style={{ width: "16px", height: "16px", margin: 0 }}></span>
+                  Aggregating Snapshot...
+                </>
+              ) : (
+                "Trigger Market Snapshot ⚡"
+              )}
+            </button>
+          </div>
+
+          {marketLoading && !marketOverview && (
+            <div className="table-loading-container" style={{ margin: "5rem 0" }}>
+              <div className="spinner"></div>
+              <p>Aggregating market snapshot & computing trend telemetry...</p>
+            </div>
+          )}
+
+          {marketError && <div className="toast toast-error">{marketError}</div>}
+
+          {!marketLoading && !marketError && marketOverview && (
+            <div className="ai-main-layout">
+              {/* Left Column: Category sentiment tracking and Topic details */}
+              <div className="ai-left-column" style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+                
+                {/* Category Breakdown with stacked Sentiment bar */}
+                <div className="glass-card" style={{ padding: "1.5rem" }}>
+                  <h2 className="card-title">🏷️ Category Volume & Sentiment Analytics</h2>
+                  <p style={{ color: "var(--color-text-dim)", fontSize: "0.85rem", marginBottom: "1.5rem" }}>
+                    Total post density per category, mapped with positive (green), neutral (gray), and negative (red) sentiment indicators.
+                  </p>
+                  
+                  <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                    {marketCategories.map((cat) => {
+                      const total = cat.positiveSentiment + cat.neutralSentiment + cat.negativeSentiment || 1;
+                      const posPct = Math.round((cat.positiveSentiment / total) * 100);
+                      const neuPct = Math.round((cat.neutralSentiment / total) * 100);
+                      const negPct = Math.round((cat.negativeSentiment / total) * 100);
+
+                      // Get Category Growth Badge
+                      const trend = marketTrends.find((t: any) => t.type === "category_growth" && t.entity === cat.category);
+                      const growthBadge = trend ? (
+                        trend.growthRate > 0 ? (
+                          <span style={{ color: "#8effd0", fontSize: "0.8rem", fontWeight: "bold" }}>+{trend.growthRate}% ↑</span>
+                        ) : trend.growthRate < 0 ? (
+                          <span style={{ color: "#ff8a8a", fontSize: "0.8rem", fontWeight: "bold" }}>{trend.growthRate}% ↓</span>
+                        ) : null
+                      ) : null;
+
+                      return (
+                        <div key={cat.category} style={{ background: "rgba(255, 255, 255, 0.01)", border: "var(--glass-border)", borderRadius: "8px", padding: "0.75rem 1rem" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.4rem" }}>
+                            <span style={{ textTransform: "capitalize", fontWeight: "bold", fontSize: "0.95rem" }}>
+                              {cat.category.replace(/_/g, " ")}
+                            </span>
+                            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                              {growthBadge}
+                              <span style={{ fontSize: "0.85rem", background: "rgba(255, 255, 255, 0.08)", padding: "0.1rem 0.5rem", borderRadius: "10px" }}>
+                                {cat.count} posts
+                              </span>
+                            </div>
+                          </div>
+                          
+                          {/* Progress stacked bar */}
+                          <div style={{ display: "flex", height: "8px", borderRadius: "4px", overflow: "hidden", background: "rgba(255, 255, 255, 0.05)" }}>
+                            {cat.positiveSentiment > 0 && (
+                              <div style={{ width: `${posPct}%`, background: "linear-gradient(90deg, #10b981 0%, #059669 100%)" }} title={`Positive: ${cat.positiveSentiment} (${posPct}%)`}></div>
+                            )}
+                            {cat.neutralSentiment > 0 && (
+                              <div style={{ width: `${neuPct}%`, background: "rgba(255, 255, 255, 0.2)" }} title={`Neutral: ${cat.neutralSentiment} (${neuPct}%)`}></div>
+                            )}
+                            {cat.negativeSentiment > 0 && (
+                              <div style={{ width: `${negPct}%`, background: "linear-gradient(90deg, #ef4444 0%, #dc2626 100%)" }} title={`Negative: ${cat.negativeSentiment} (${negPct}%)`}></div>
+                            )}
+                          </div>
+                          
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "var(--color-text-dim)", marginTop: "0.3rem" }}>
+                            <span>Positive: {posPct}%</span>
+                            <span>Neutral: {neuPct}%</span>
+                            <span>Negative: {negPct}%</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Emerging vs Declining Topics list */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem" }}>
+                  
+                  {/* Emerging */}
+                  <div className="glass-card" style={{ padding: "1.5rem" }}>
+                    <h2 className="card-title">🔥 Emerging Topics (&gt;50% Growth)</h2>
+                    {marketEmerging.length === 0 ? (
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.9rem", textAlign: "center", padding: "1.5rem 0" }}>
+                        No emerging topic signals detected yet.
+                      </p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                        {marketEmerging.map((item) => (
+                          <div key={item.topic} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", background: "rgba(16, 185, 129, 0.05)", border: "1px solid rgba(16, 185, 129, 0.1)", borderRadius: "8px" }}>
+                            <span style={{ fontWeight: "bold" }}>#{item.topic}</span>
+                            <span style={{ color: "#8effd0", fontWeight: "bold", background: "rgba(16, 185, 129, 0.15)", padding: "0.2rem 0.5rem", borderRadius: "12px", fontSize: "0.8rem" }}>
+                              +{item.growthRate}% Growth
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Declining */}
+                  <div className="glass-card" style={{ padding: "1.5rem" }}>
+                    <h2 className="card-title">❄️ Declining Topics (&gt;30% Drop)</h2>
+                    {marketTrends.filter((t) => t.type === "declining_topic").length === 0 ? (
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.9rem", textAlign: "center", padding: "1.5rem 0" }}>
+                        No declining topic signals detected yet.
+                      </p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                        {marketTrends.filter((t) => t.type === "declining_topic").map((item) => (
+                          <div key={item.entity} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", background: "rgba(239, 68, 68, 0.05)", border: "1px solid rgba(239, 68, 68, 0.1)", borderRadius: "8px" }}>
+                            <span style={{ fontWeight: "bold" }}>#{item.entity}</span>
+                            <span style={{ color: "#ff8a8a", fontWeight: "bold", background: "rgba(239, 68, 68, 0.15)", padding: "0.2rem 0.5rem", borderRadius: "12px", fontSize: "0.8rem" }}>
+                              {item.growthRate}% Drop
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Right Column: Keywords table, mentions, trend events feed */}
+              <div className="glass-card breakdowns-panel" style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+                
+                {/* Keywords Table with growth Rate badges */}
+                <div>
+                  <h2 className="card-title">📈 Top Market Keywords</h2>
+                  {marketKeywords.length === 0 ? (
+                    <p style={{ color: "var(--color-text-dim)", fontSize: "0.9rem" }}>No keywords extracted.</p>
+                  ) : (
+                    <table className="leads-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.1)" }}>
+                          <th style={{ textAlign: "left", paddingBottom: "0.5rem" }}>Keyword</th>
+                          <th style={{ textAlign: "center", paddingBottom: "0.5rem" }}>Mentions</th>
+                          <th style={{ textAlign: "right", paddingBottom: "0.5rem" }}>Growth Trend</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {marketKeywords.map((item) => {
+                          const trend = marketTrends.find((t: any) => t.type === "keyword_growth" && t.entity === item.keyword);
+                          const trendBadge = trend ? (
+                            trend.growthRate > 0 ? (
+                              <span style={{ color: "#8effd0" }}>+{trend.growthRate}% ↑</span>
+                            ) : trend.growthRate < 0 ? (
+                              <span style={{ color: "#ff8a8a" }}>{trend.growthRate}% ↓</span>
+                            ) : (
+                              <span style={{ color: "var(--color-text-dim)" }}>Stable</span>
+                            )
+                          ) : (
+                            <span style={{ color: "var(--color-text-dim)" }}>Stable</span>
+                          );
+
+                          return (
+                            <tr key={item.keyword} style={{ borderBottom: "1px solid rgba(255, 255, 255, 0.05)" }}>
+                              <td style={{ padding: "0.5rem 0", fontWeight: "bold" }}>#{item.keyword}</td>
+                              <td style={{ padding: "0.5rem 0", textAlign: "center" }}>{item.count}</td>
+                              <td style={{ padding: "0.5rem 0", textAlign: "right" }}>{trendBadge}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Intent growth list */}
+                <div>
+                  <h2 className="card-title">🤝 Intent Distributions</h2>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    {marketIntents.map((item) => {
+                      const trend = marketTrends.find((t: any) => t.type === "intent_growth" && t.entity === item.intent);
+                      const growthBadge = trend ? (
+                        trend.growthRate > 0 ? (
+                          <span style={{ color: "#8effd0", fontSize: "0.8rem" }}>+{trend.growthRate}% ↑</span>
+                        ) : trend.growthRate < 0 ? (
+                          <span style={{ color: "#ff8a8a", fontSize: "0.8rem" }}>{trend.growthRate}% ↓</span>
+                        ) : null
+                      ) : null;
+
+                      return (
+                        <div key={item.intent} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.9rem", padding: "0.4rem 0.7rem", background: "rgba(255, 255, 255, 0.02)", borderRadius: "6px" }}>
+                          <span style={{ textTransform: "capitalize" }}>{item.intent.replace(/_/g, " ")}</span>
+                          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                            {growthBadge}
+                            <strong style={{ background: "rgba(255, 255, 255, 0.05)", padding: "0.1rem 0.4rem", borderRadius: "6px" }}>{item.count}</strong>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Mentions */}
+                <div>
+                  <h2 className="card-title">👤 Most Mentioned Accounts</h2>
+                  {marketMentions.length === 0 ? (
+                    <p style={{ color: "var(--color-text-dim)", fontSize: "0.9rem" }}>No mentions tracked.</p>
+                  ) : (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                      {marketMentions.slice(0, 15).map((item) => (
+                        <span key={item.mention} className="keyword-pill" style={{ background: "rgba(159, 62, 255, 0.1)", border: "1px solid rgba(159, 62, 255, 0.2)" }}>
+                          @{item.mention} ({item.count})
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Trend Event Feed */}
+                <div>
+                  <h2 className="card-title">⚡ Real-time Market Trend Feed</h2>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxHeight: "300px", overflowY: "auto", paddingRight: "0.5rem" }}>
+                    {marketTrends.length === 0 ? (
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.9rem" }}>No market trend events recorded yet.</p>
+                    ) : (
+                      marketTrends.map((evt, idx) => (
+                        <div key={idx} style={{ background: "rgba(159, 62, 255, 0.02)", border: "1px solid rgba(159, 62, 255, 0.1)", borderRadius: "8px", padding: "0.6rem 0.8rem", fontSize: "0.85rem" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.2rem" }}>
+                            <span style={{ fontWeight: "bold", textTransform: "capitalize", color: "#d19eff" }}>
+                              {evt.type.replace(/_/g, " ").toUpperCase()}
+                            </span>
+                            <span style={{ fontSize: "0.7rem", color: "var(--color-text-dim)" }}>
+                              {new Date(evt.detectedAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          
+                          {evt.type === "keyword_growth" && (
+                            <div>
+                              Keyword <strong>#{evt.entity}</strong> grew: <strong>{evt.oldValue}</strong> → <strong>{evt.newValue}</strong> ({evt.growthRate > 0 ? `+${evt.growthRate}%` : `${evt.growthRate}%`})
+                            </div>
+                          )}
+                          {evt.type === "emerging_topic" && (
+                            <div style={{ color: "#8effd0" }}>
+                              🔥 Emerging Topic: <strong>#{evt.entity}</strong> surged by <strong>+{evt.growthRate}%</strong>!
+                            </div>
+                          )}
+                          {evt.type === "declining_topic" && (
+                            <div style={{ color: "#ff8a8a" }}>
+                              ❄️ Declining Topic: <strong>#{evt.entity}</strong> declined by <strong>{evt.growthRate}%</strong>.
+                            </div>
+                          )}
+                          {evt.type === "category_growth" && (
+                            <div>
+                              Category <strong>{evt.entity}</strong> shift: <strong>{evt.oldValue}</strong> → <strong>{evt.newValue}</strong> ({evt.growthRate > 0 ? `+${evt.growthRate}%` : `${evt.growthRate}%`})
+                            </div>
+                          )}
+                          {evt.type === "intent_growth" && (
+                            <div>
+                              Intent <strong>{evt.entity}</strong> shift: <strong>{evt.oldValue}</strong> → <strong>{evt.newValue}</strong> ({evt.growthRate > 0 ? `+${evt.growthRate}%` : `${evt.growthRate}%`})
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          )}
         </div>
       )}
 

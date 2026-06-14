@@ -10,6 +10,7 @@ export interface PostAnalysisAttrs {
   leadScore: number;
   extractedKeywords: string[];
   summary: string;
+  sentiment: string;
   analyzedAt: Date;
 }
 
@@ -62,6 +63,14 @@ const postAnalysisSchema = new Schema(
     summary: {
       type: String,
       required: true,
+    },
+    sentiment: {
+      type: String,
+      enum: ["positive", "neutral", "negative"],
+      default: "neutral",
+      required: true,
+      trim: true,
+      index: true,
     },
     analyzedAt: {
       type: Date,

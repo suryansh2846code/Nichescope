@@ -65,6 +65,17 @@ export class MockAIProvider implements AIProvider {
       keywords.push(...words.map(w => w.replace(/[^a-z0-9]/gi, "")));
     }
 
+    // Infer sentiment from keywords
+    let sentiment: "positive" | "neutral" | "negative" = "neutral";
+    const negativeKeywords = ["help", "struggle", "worse", "worsening", "complain", "hate", "worst", "bad service", "pain", "annoying", "acne", "breaking out"];
+    const positiveKeywords = ["love", "great", "excellent", "awesome", "solved", "recommend", "best", "good", "happy"];
+    
+    if (negativeKeywords.some(kw => text.includes(kw))) {
+      sentiment = "negative";
+    } else if (positiveKeywords.some(kw => text.includes(kw))) {
+      sentiment = "positive";
+    }
+
     return {
       isLead,
       category,
@@ -72,6 +83,7 @@ export class MockAIProvider implements AIProvider {
       confidence,
       keywords,
       summary,
+      sentiment,
     };
   }
 

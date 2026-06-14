@@ -12,7 +12,7 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async analyzeCaption(caption: string): Promise<AnalysisResult> {
-    const systemPrompt = `You are an AI lead discovery agent. Analyze the provided Instagram caption and classify it into one of the following categories and intents.
+    const systemPrompt = `You are an AI lead discovery agent. Analyze the provided Instagram caption and classify it into one of the following categories and intents. Also perform sentiment analysis.
 
 Categories:
 - healthcare (medical, skin conditions, health issues, doctors, dermatologists, etc.)
@@ -35,6 +35,11 @@ Intents:
 - promotion (advertising or promoting something)
 - other (everything else)
 
+Sentiment:
+- positive (happy, satisfied, recommending, positive feedback)
+- neutral (impartial, informational, sharing facts/news without clear emotional tilt)
+- negative (frustrated, struggling, complaining, unhappy, in pain)
+
 If the user is looking for advice, recommendations, buying options, or expressing struggle in one of these domains, set isLead to true. Otherwise, set it to false.
 Confidence should be a number from 0 to 100 representing classification confidence.
 Keywords should be 1-5 extracted words representing the topic.
@@ -47,7 +52,8 @@ Return a STRICT JSON response in this exact format, with no markdown wrappers:
   "intent": string,
   "confidence": number,
   "keywords": string[],
-  "summary": string
+  "summary": string,
+  "sentiment": string
 }`;
 
     const headers: Record<string, string> = {
@@ -89,6 +95,11 @@ Return a STRICT JSON response in this exact format, with no markdown wrappers:
 
       const parsed = JSON.parse(textResult) as AnalysisResult;
 
+      let parsedSentiment: "positive" | "neutral" | "negative" = "neutral";
+      if (parsed.sentiment === "positive" || parsed.sentiment === "negative" || parsed.sentiment === "neutral") {
+        parsedSentiment = parsed.sentiment;
+      }
+
       // Ensure properties are defined and formatted
       return {
         isLead: !!parsed.isLead,
@@ -97,6 +108,7 @@ Return a STRICT JSON response in this exact format, with no markdown wrappers:
         confidence: typeof parsed.confidence === "number" ? parsed.confidence : 80,
         keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
         summary: typeof parsed.summary === "string" ? parsed.summary : "No summary available.",
+        sentiment: parsedSentiment,
       };
     } catch (err) {
       console.error("Failed during AI caption analysis request:", err);

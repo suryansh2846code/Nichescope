@@ -5,6 +5,7 @@ export interface AnalysisResult {
   confidence: number;
   keywords: string[];
   summary: string;
+  sentiment: "positive" | "neutral" | "negative";
 }
 
 export interface AIProvider {

@@ -16,9 +16,26 @@ export interface ScrapedInstagramProfile {
   };
 }
 
+export interface ScrapedPost {
+  postId: string;
+  caption: string;
+  postUrl: string;
+  postedAt?: Date;
+  likes?: number;
+  commentsCount?: number;
+  hashtags: string[];
+  mentions: string[];
+}
+
+export interface ScrapedInstagramResult {
+  profile: ScrapedInstagramProfile;
+  posts: ScrapedPost[];
+}
+
 interface ScrapeProfileOptions {
   headless?: boolean;
   timeoutMs?: number;
+  maxPosts?: number;
 }
 
 const INSTAGRAM_BASE_URL = "https://www.instagram.com";
@@ -68,15 +85,196 @@ export function parseInstagramDescription(description: string) {
   };
 }
 
+export function parsePostMetaDescription(desc: string) {
+  const trimmed = desc.trim();
+
+  // Pattern 1: X likes, Y comments - User on Date: "Caption"
+  const fullMatch = trimmed.match(/^([\d.,KMBkmb]+)\s+likes?,\s+([\d.,KMBkmb]+)\s+comments?\s+-\s+([a-zA-Z0-9_.-]+)\s+on\s+([^:]+):\s*"(.*)"(?:\.|\s)*$/s);
+  if (fullMatch) {
+    return {
+      likes: parseInstagramCount(fullMatch[1]),
+      commentsCount: parseInstagramCount(fullMatch[2]),
+      username: fullMatch[3],
+      dateStr: fullMatch[4].trim(),
+      caption: fullMatch[5].trim(),
+    };
+  }
+
+  // Pattern 2: X likes - User on Date: "Caption"
+  const likesOnlyMatch = trimmed.match(/^([\d.,KMBkmb]+)\s+likes?\s+-\s+([a-zA-Z0-9_.-]+)\s+on\s+([^:]+):\s*"(.*)"(?:\.|\s)*$/s);
+  if (likesOnlyMatch) {
+    return {
+      likes: parseInstagramCount(likesOnlyMatch[1]),
+      commentsCount: null,
+      username: likesOnlyMatch[2],
+      dateStr: likesOnlyMatch[3].trim(),
+      caption: likesOnlyMatch[4].trim(),
+    };
+  }
+
+  // Pattern 3: Y comments - User on Date: "Caption"
+  const commentsOnlyMatch = trimmed.match(/^([\d.,KMBkmb]+)\s+comments?\s+-\s+([a-zA-Z0-9_.-]+)\s+on\s+([^:]+):\s*"(.*)"(?:\.|\s)*$/s);
+  if (commentsOnlyMatch) {
+    return {
+      likes: null,
+      commentsCount: parseInstagramCount(commentsOnlyMatch[1]),
+      username: commentsOnlyMatch[2],
+      dateStr: commentsOnlyMatch[3].trim(),
+      caption: commentsOnlyMatch[4].trim(),
+    };
+  }
+
+  // Pattern 4: User on Date: "Caption"
+  const minimalMatch = trimmed.match(/^([a-zA-Z0-9_.-]+)\s+on\s+([^:]+):\s*"(.*)"(?:\.|\s)*$/s);
+  if (minimalMatch) {
+    return {
+      likes: null,
+      commentsCount: null,
+      username: minimalMatch[1],
+      dateStr: minimalMatch[2].trim(),
+      caption: minimalMatch[3].trim(),
+    };
+  }
+
+  return null;
+}
+
+export function extractHashtags(caption: string): string[] {
+  if (!caption) return [];
+  const matches = caption.match(/#[a-zA-Z0-9_\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff]+/g);
+  return matches ? matches.map(m => m.substring(1)) : [];
+}
+
+export function extractMentions(caption: string): string[] {
+  if (!caption) return [];
+  const matches = caption.match(/(?<=^|[^a-zA-Z0-9_.-])@([a-zA-Z0-9_.]+)/g);
+  return matches ? matches.map(m => m.substring(1).replace(/\.+$/, "")) : [];
+}
+
 function parseFullNameFromTitle(title: string, username: string): string {
   const prefix = title.split(`(@${username})`)[0]?.trim();
   return prefix || username;
 }
 
+export async function extractProfileData(
+  page: any,
+  username: string
+): Promise<ScrapedInstagramProfile> {
+  const metadata = await page.evaluate(() => {
+    const getMeta = (selector: string) =>
+      document.querySelector<HTMLMetaElement>(selector)?.content || "";
+
+    return {
+      title: document.title,
+      description:
+        getMeta('meta[property="og:description"]') ||
+        getMeta('meta[name="description"]'),
+      canonicalUrl:
+        document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href ||
+        window.location.href,
+    };
+  });
+
+  const parsedDescription = parseInstagramDescription(metadata.description);
+
+  return {
+    username,
+    fullName: parseFullNameFromTitle(metadata.title, username),
+    bio: parsedDescription.bio,
+    followerCount: parsedDescription.followerCount,
+    followingCount: parsedDescription.followingCount,
+    postCount: parsedDescription.postCount,
+    profileUrl: metadata.canonicalUrl || `${INSTAGRAM_BASE_URL}/${username}/`,
+    scrapedAt: new Date(),
+    rawData: metadata,
+  };
+}
+
+export async function extractPosts(
+  page: any,
+  maxPosts: number = 15
+): Promise<ScrapedPost[]> {
+  // Grab initial links
+  let postUrls = await page.evaluate(() => {
+    const anchors = Array.from(document.querySelectorAll('a'));
+    return anchors
+      .map(a => a.href)
+      .filter(href => href.includes('/p/') || href.includes('/reel/'))
+      .filter((value, index, self) => self.indexOf(value) === index);
+  });
+
+  // Scroll to load more links if needed
+  let scrolls = 0;
+  while (postUrls.length < maxPosts && scrolls < 3) {
+    console.log(`Scrolling profile page to load more posts... Current unique count: ${postUrls.length}`);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(2000);
+
+    const newUrls = await page.evaluate(() => {
+      const anchors = Array.from(document.querySelectorAll('a'));
+      return anchors
+        .map(a => a.href)
+        .filter(href => href.includes('/p/') || href.includes('/reel/'));
+    });
+
+    postUrls = [...new Set([...postUrls, ...newUrls])];
+    scrolls++;
+  }
+
+  const targetUrls = postUrls.slice(0, maxPosts);
+  console.log(`Extracting details for ${targetUrls.length} posts...`);
+
+  const scrapedPosts: ScrapedPost[] = [];
+  for (const url of targetUrls) {
+    try {
+      console.log(`Scraping post: ${url}`);
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+      await page.waitForTimeout(1000);
+
+      const desc = await page.evaluate(() => {
+        const getMeta = (selector: string) =>
+          document.querySelector<HTMLMetaElement>(selector)?.content || "";
+        return getMeta('meta[property="og:description"]') || getMeta('meta[name="description"]');
+      });
+
+      if (desc) {
+        const parsed = parsePostMetaDescription(desc);
+        if (parsed) {
+          const match = url.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
+          const postId = match ? match[1] : url;
+
+          const hashtags = extractHashtags(parsed.caption);
+          const mentions = extractMentions(parsed.caption);
+
+          scrapedPosts.push({
+            postId,
+            caption: parsed.caption,
+            postUrl: url,
+            postedAt: parsed.dateStr ? new Date(parsed.dateStr) : undefined,
+            likes: parsed.likes !== null ? parsed.likes : undefined,
+            commentsCount: parsed.commentsCount !== null ? parsed.commentsCount : undefined,
+            hashtags,
+            mentions,
+          });
+        } else {
+          console.warn(`Could not parse metadata pattern from meta description for post: ${url}`);
+        }
+      } else {
+        console.warn(`No meta description tag found for post: ${url}`);
+      }
+    } catch (err) {
+      console.error(`Failed to extract post details from ${url}:`, err instanceof Error ? err.message : String(err));
+      // Log failure but continue processing remaining posts
+    }
+  }
+
+  return scrapedPosts;
+}
+
 export async function scrapeProfile(
   username: string,
   options: ScrapeProfileOptions = {},
-): Promise<ScrapedInstagramProfile> {
+): Promise<ScrapedInstagramResult> {
   const cleanUsername = username.replace(/^@/, "").trim();
 
   if (!cleanUsername) {
@@ -94,38 +292,18 @@ export async function scrapeProfile(
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     });
 
+    console.log(`Navigating to profile: ${profileUrl}`);
     await page.goto(profileUrl, {
-      waitUntil: "domcontentloaded",
+      waitUntil: "networkidle",
       timeout: options.timeoutMs ?? 30_000,
     });
 
-    const metadata = await page.evaluate(() => {
-      const getMeta = (selector: string) =>
-        document.querySelector<HTMLMetaElement>(selector)?.content || "";
-
-      return {
-        title: document.title,
-        description:
-          getMeta('meta[property="og:description"]') ||
-          getMeta('meta[name="description"]'),
-        canonicalUrl:
-          document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href ||
-          window.location.href,
-      };
-    });
-
-    const parsedDescription = parseInstagramDescription(metadata.description);
+    const profile = await extractProfileData(page, cleanUsername);
+    const posts = await extractPosts(page, options.maxPosts ?? 15);
 
     return {
-      username: cleanUsername,
-      fullName: parseFullNameFromTitle(metadata.title, cleanUsername),
-      bio: parsedDescription.bio,
-      followerCount: parsedDescription.followerCount,
-      followingCount: parsedDescription.followingCount,
-      postCount: parsedDescription.postCount,
-      profileUrl: metadata.canonicalUrl || profileUrl,
-      scrapedAt: new Date(),
-      rawData: metadata,
+      profile,
+      posts,
     };
   } finally {
     await browser.close();
@@ -140,6 +318,6 @@ if (import.meta.main) {
     process.exit(1);
   }
 
-  const profile = await scrapeProfile(username);
-  console.log(JSON.stringify(profile, null, 2));
+  const result = await scrapeProfile(username);
+  console.log(JSON.stringify(result, null, 2));
 }

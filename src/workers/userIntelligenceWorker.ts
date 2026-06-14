@@ -6,6 +6,9 @@ import { PostAnalysis } from "../models/PostAnalysis";
 import { Post } from "../models/Post";
 import { UserIntelligence } from "../models/UserIntelligence";
 import { getAIProvider } from "../services/ai/AIProvider";
+import { LeadScoreHistory } from "../models/LeadScoreHistory";
+import { ChangeEvent } from "../models/ChangeEvent";
+import { UserMonitoring } from "../models/UserMonitoring";
 
 // Connect to MongoDB
 try {
@@ -140,7 +143,10 @@ export async function processUserIntelligenceJob(job: {
     lastSeenAt = new Date(Math.max(...dates.map((d) => d.getTime())));
   }
 
-  // 7. Save or Update UserIntelligence
+  // 7. Load old UserIntelligence for change detection
+  const oldIntel = await UserIntelligence.findOne({ username: normalizedUser });
+
+  // 8. Save or Update UserIntelligence
   const userIntel = await UserIntelligence.findOneAndUpdate(
     { username: normalizedUser },
     {
@@ -160,6 +166,78 @@ export async function processUserIntelligenceJob(job: {
     },
     { upsert: true, returnDocument: "after" }
   );
+
+  // 9. Run change detection logic
+  try {
+    if (oldIntel) {
+      // Compare lead score increase
+      if (finalLeadScore > oldIntel.leadScore) {
+        const delta = finalLeadScore - oldIntel.leadScore;
+        await ChangeEvent.create({
+          username: normalizedUser,
+          changeType: "lead_score_increase",
+          oldValue: String(oldIntel.leadScore),
+          newValue: String(finalLeadScore),
+          delta,
+          detectedAt: new Date(),
+        });
+        console.log(`Detected Lead Score Increase for @${normalizedUser}: +${delta}`);
+      }
+
+      // Compare category change
+      if (overallCategory !== oldIntel.overallCategory) {
+        await ChangeEvent.create({
+          username: normalizedUser,
+          changeType: "category_change",
+          oldValue: oldIntel.overallCategory,
+          newValue: overallCategory,
+          detectedAt: new Date(),
+        });
+        console.log(`Detected Category Shift for @${normalizedUser}: ${oldIntel.overallCategory} -> ${overallCategory}`);
+      }
+
+      // Compare intent change
+      if (overallIntent !== oldIntel.overallIntent) {
+        await ChangeEvent.create({
+          username: normalizedUser,
+          changeType: "intent_change",
+          oldValue: oldIntel.overallIntent,
+          newValue: overallIntent,
+          detectedAt: new Date(),
+        });
+        console.log(`Detected Intent Shift for @${normalizedUser}: ${oldIntel.overallIntent} -> ${overallIntent}`);
+      }
+    }
+
+    // Always log LeadScoreHistory snapshot
+    await LeadScoreHistory.create({
+      username: normalizedUser,
+      leadScore: finalLeadScore,
+      category: overallCategory,
+      intent: overallIntent,
+      recordedAt: new Date(),
+    });
+
+    // Automatically initialize UserMonitoring with default true if not exists yet
+    const existingMonitor = await UserMonitoring.findOne({ username: normalizedUser });
+    if (!existingMonitor) {
+      await UserMonitoring.create({
+        username: normalizedUser,
+        lastCheckedAt: new Date(),
+        lastPostCount: posts.length,
+        lastPostIds: posts.map((p) => p.postId),
+        monitoringEnabled: true,
+        totalChecks: 1,
+        totalChangesDetected: 0,
+      });
+      console.log(`Initialized UserMonitoring configuration for @${normalizedUser}`);
+    }
+  } catch (err) {
+    console.error(
+      `Error in change detection logic for @${normalizedUser}:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
 
   await job.updateProgress(100);
   console.log(

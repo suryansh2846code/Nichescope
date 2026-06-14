@@ -71,7 +71,21 @@ interface PostAnalysisResult {
 
 export default function App() {
   // Navigation
-  const [activeTab, setActiveTab] = useState<"pipeline" | "ai" | "user" | "search">("pipeline");
+  const [activeTab, setActiveTab] = useState<"pipeline" | "ai" | "user" | "search" | "monitoring">("pipeline");
+
+  // Telemetry Monitoring State
+  const [monitoringConfigs, setMonitoringConfigs] = useState<any[]>([]);
+  const [trendingLeads, setTrendingLeads] = useState<any[]>([]);
+  const [recentlyActive, setRecentlyActive] = useState<any[]>([]);
+  const [changeEvents, setChangeEvents] = useState<any[]>([]);
+  const [monitoringLoading, setMonitoringLoading] = useState(false);
+  const [monitoringError, setMonitoringError] = useState<string | null>(null);
+
+  // Single User History State (Timeline Modal)
+  const [historyUsername, setHistoryUsername] = useState<string | null>(null);
+  const [userHistory, setUserHistory] = useState<any | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   // Semantic Search Tab State
   const [searchQuery, setSearchQuery] = useState("");
@@ -260,6 +274,84 @@ export default function App() {
     e.preventDefault();
     fetchSearchResults(searchQuery);
   };
+
+  // Fetch Monitoring Telemetry Data
+  const fetchMonitoringData = useCallback(async () => {
+    setMonitoringLoading(true);
+    setMonitoringError(null);
+    try {
+      const [configsRes, trendingRes, activeRes, eventsRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/monitoring`),
+        fetch(`${API_BASE_URL}/monitoring/trending`),
+        fetch(`${API_BASE_URL}/monitoring/recent-activity`),
+        fetch(`${API_BASE_URL}/monitoring/change-events`),
+      ]);
+
+      if (!configsRes.ok || !trendingRes.ok || !activeRes.ok || !eventsRes.ok) {
+        throw new Error("Failed to load monitoring dataset from backend");
+      }
+
+      const [configs, trending, active, events] = await Promise.all([
+        configsRes.json(),
+        trendingRes.json(),
+        activeRes.json(),
+        eventsRes.json(),
+      ]);
+
+      setMonitoringConfigs(configs);
+      setTrendingLeads(trending);
+      setRecentlyActive(active);
+      setChangeEvents(events);
+    } catch (err) {
+      setMonitoringError(err instanceof Error ? err.message : "Error fetching monitoring telemetry");
+    } finally {
+      setMonitoringLoading(false);
+    }
+  }, []);
+
+  // Fetch Single User History
+  const fetchUserHistory = useCallback(async (username: string) => {
+    setHistoryUsername(username);
+    setHistoryLoading(true);
+    setHistoryError(null);
+    setUserHistory(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/monitoring/${username}/history`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch score history for @${username}`);
+      }
+      const data = await res.json();
+      setUserHistory(data);
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : `Error fetching score history for @${username}`);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  // Toggle user monitoring configuration
+  const handleToggleMonitoring = async (username: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/monitoring/${username}/toggle`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to toggle monitoring configurations for @${username}`);
+      }
+      // Re-fetch datasets
+      fetchMonitoringData();
+      fetchUsersData();
+    } catch (err) {
+      console.error("Toggle monitoring failed:", err);
+    }
+  };
+
+  // Monitoring load and reload
+  useEffect(() => {
+    if (activeTab === "monitoring") {
+      fetchMonitoringData();
+    }
+  }, [activeTab, fetchMonitoringData]);
 
   // Initial load and filter reload
   useEffect(() => {
@@ -480,6 +572,12 @@ export default function App() {
           onClick={() => setActiveTab("search")}
         >
           🔍 Semantic Search
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "monitoring" ? "active" : ""}`}
+          onClick={() => setActiveTab("monitoring")}
+        >
+          📈 Lead Monitoring
         </button>
       </div>
 
@@ -1637,6 +1735,419 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "monitoring" && (
+        <div className="ai-dashboard animate-slide-in">
+          {/* Stats Row */}
+          <div className="ai-stats-row">
+            <div className="stat-card">
+              <span className="stat-card-label">Monitored Users</span>
+              <span className="stat-card-value">
+                {monitoringConfigs.filter((c) => c.monitoringEnabled).length} / {monitoringConfigs.length}
+              </span>
+              <span className="stat-card-desc">Active monitoring profiles</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-card-label">Trending Leads</span>
+              <span className="stat-card-value">
+                {trendingLeads.filter((t) => t.scoreIncrease > 0).length}
+              </span>
+              <span className="stat-card-desc">Users with positive score growth</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-card-label">Total Re-checks</span>
+              <span className="stat-card-value">
+                {monitoringConfigs.reduce((sum, c) => sum + (c.totalChecks || 0), 0)}
+              </span>
+              <span className="stat-card-desc">Scrapes executed by scheduler</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-card-label">Changes Detected</span>
+              <span className="stat-card-value">
+                {monitoringConfigs.reduce((sum, c) => sum + (c.totalChangesDetected || 0), 0)}
+              </span>
+              <span className="stat-card-desc">New activity & index shifts</span>
+            </div>
+          </div>
+
+          <div className="ai-main-layout">
+            {/* Left Column: Trending and Configurations */}
+            <div className="ai-left-column" style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+              
+              {/* Trending Leads */}
+              <div className="glass-card" style={{ padding: "1.5rem" }}>
+                <h2 className="card-title">📈 Top Rising Leads</h2>
+                
+                {monitoringLoading && (
+                  <div className="table-loading-container" style={{ margin: "2rem 0" }}>
+                    <div className="spinner"></div>
+                    <p>Loading trending analytics...</p>
+                  </div>
+                )}
+
+                {monitoringError && <div className="toast toast-error">{monitoringError}</div>}
+
+                {!monitoringLoading && !monitoringError && trendingLeads.length === 0 && (
+                  <p style={{ color: "var(--color-text-dim)", textAlign: "center", padding: "2rem 0" }}>
+                    No trending telemetry available. Run more checks to see score progression.
+                  </p>
+                )}
+
+                {!monitoringLoading && !monitoringError && trendingLeads.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                    {trendingLeads.slice(0, 10).map((lead) => (
+                      <div key={lead.username} className="ai-lead-card" style={{ gridTemplateColumns: "auto 1fr auto" }}>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                          <div className={getScoreBadgeClass(lead.currentScore)}>
+                            {lead.currentScore}
+                          </div>
+                          {lead.scoreIncrease > 0 ? (
+                            <span style={{ 
+                              color: "#8effd0", 
+                              background: "rgba(16, 185, 129, 0.15)", 
+                              padding: "0.2rem 0.6rem", 
+                              borderRadius: "12px", 
+                              fontSize: "0.8rem", 
+                              fontWeight: "bold",
+                              marginTop: "0.5rem" 
+                            }}>
+                              +{lead.scoreIncrease} Growth
+                            </span>
+                          ) : (
+                            <span style={{ 
+                              color: "var(--color-text-dim)", 
+                              background: "rgba(255, 255, 255, 0.05)", 
+                              padding: "0.2rem 0.6rem", 
+                              borderRadius: "12px", 
+                              fontSize: "0.8rem", 
+                              marginTop: "0.5rem" 
+                            }}>
+                              Stable
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="ai-lead-details">
+                          <span className="ai-lead-user" style={{ fontSize: "1.2rem" }}>
+                            @{lead.username}
+                          </span>
+                          <div className="ai-lead-meta" style={{ marginTop: "0.5rem" }}>
+                            <span className={getCategoryBadgeClass(lead.category)}>
+                              {lead.category}
+                            </span>
+                            <span className="ai-intent-badge">
+                              {intentDisplayNames[lead.intent] || lead.intent}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: "0.75rem", color: "var(--color-text-dim)" }}>
+                            Last updated {new Date(lead.lastUpdated).toLocaleDateString()}
+                          </span>
+                        </div>
+
+                        <div>
+                          <button
+                            onClick={() => fetchUserHistory(lead.username)}
+                            className="btn btn-primary"
+                            style={{ padding: "0.6rem 1rem", fontSize: "0.85rem" }}
+                          >
+                            Timeline 📊
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Monitoring Config list */}
+              <div className="glass-card card-table" style={{ padding: "1.5rem" }}>
+                <h2 className="card-title">⚙️ Monitoring Status Configuration</h2>
+                
+                {monitoringConfigs.length === 0 ? (
+                  <p style={{ color: "var(--color-text-dim)", textAlign: "center", padding: "2rem 0" }}>
+                    No configurations found. Add profile intelligence aggregated to initialize.
+                  </p>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="leads-table">
+                      <thead>
+                        <tr>
+                          <th>Username</th>
+                          <th>Status</th>
+                          <th>Last Checked</th>
+                          <th>Checks Run</th>
+                          <th>Changes</th>
+                          <th>Settings</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {monitoringConfigs.map((config) => (
+                          <tr key={config.username} className="lead-row">
+                            <td style={{ fontWeight: "bold" }}>@{config.username}</td>
+                            <td>
+                              <span className={`status-badge ${config.monitoringEnabled ? "status-completed" : "status-failed"}`}>
+                                {config.monitoringEnabled ? "ENABLED" : "PAUSED"}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: "0.85rem", color: "var(--color-text-dim)" }}>
+                                {config.lastCheckedAt && new Date(config.lastCheckedAt).getTime() > 0
+                                  ? new Date(config.lastCheckedAt).toLocaleString()
+                                  : "Never"}
+                              </span>
+                            </td>
+                            <td>{config.totalChecks}</td>
+                            <td>{config.totalChangesDetected}</td>
+                            <td>
+                              <button
+                                onClick={() => handleToggleMonitoring(config.username)}
+                                className={`btn ${config.monitoringEnabled ? "btn-secondary" : "btn-primary"}`}
+                                style={{ padding: "0.4rem 0.8rem", fontSize: "0.8rem" }}
+                              >
+                                {config.monitoringEnabled ? "Pause" : "Monitor"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right Column: Activity Log and transition feeds */}
+            <div className="glass-card breakdowns-panel" style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+              <div>
+                <h2 className="card-title">🚨 Recent Activity Alerts</h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", maxHeight: "400px", overflowY: "auto", paddingRight: "0.5rem" }}>
+                  {recentlyActive.length === 0 ? (
+                    <p style={{ color: "var(--color-text-dim)", fontSize: "0.9rem" }}>No recent activity detected.</p>
+                  ) : (
+                    recentlyActive.map((act) => (
+                      <div key={act.username} style={{ 
+                        background: "rgba(255, 255, 255, 0.02)", 
+                        border: "var(--glass-border)", 
+                        borderRadius: "8px", 
+                        padding: "0.75rem 1rem",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center"
+                      }}>
+                        <div>
+                          <strong style={{ display: "block" }}>@{act.username}</strong>
+                          <span style={{ fontSize: "0.85rem", color: "#8effd0" }}>
+                            📥 {act.newPostsCount} new posts scraped
+                          </span>
+                        </div>
+                        <span style={{ fontSize: "0.75rem", color: "var(--color-text-dim)" }}>
+                          {new Date(act.detectedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <h2 className="card-title">⚡ Change & Transition Log</h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", maxHeight: "500px", overflowY: "auto", paddingRight: "0.5rem" }}>
+                  {changeEvents.length === 0 ? (
+                    <p style={{ color: "var(--color-text-dim)", fontSize: "0.9rem" }}>No change events recorded.</p>
+                  ) : (
+                    changeEvents.map((evt) => (
+                      <div key={evt._id} style={{ 
+                        background: "rgba(159, 62, 255, 0.02)", 
+                        border: "1px solid rgba(159, 62, 255, 0.1)", 
+                        borderRadius: "8px", 
+                        padding: "0.75rem 1rem",
+                        fontSize: "0.9rem"
+                      }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.4rem" }}>
+                          <span style={{ fontWeight: "bold" }}>@{evt.username}</span>
+                          <span style={{ fontSize: "0.75rem", color: "var(--color-text-dim)" }}>
+                            {new Date(evt.detectedAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        
+                        {evt.changeType === "lead_score_increase" && (
+                          <div style={{ color: "#d19eff" }}>
+                            🚀 Lead Score Increased: <strong>{evt.oldValue}</strong> → <strong>{evt.newValue}</strong> (+{evt.delta})
+                          </div>
+                        )}
+
+                        {evt.changeType === "category_change" && (
+                          <div style={{ color: "#a4f2ff" }}>
+                            🏷️ Category Shifted: <span className="niche-badge" style={{ fontSize: "0.7rem" }}>{evt.oldValue}</span> → <span className="niche-badge" style={{ fontSize: "0.7rem", background: "rgba(0, 216, 255, 0.2)" }}>{evt.newValue}</span>
+                          </div>
+                        )}
+
+                        {evt.changeType === "intent_change" && (
+                          <div style={{ color: "#ffcf8a" }}>
+                            🤝 Intent Transition: <span style={{ fontSize: "0.85rem", textTransform: "capitalize", opacity: 0.8 }}>{evt.oldValue}</span> → <strong>{intentDisplayNames[evt.newValue || ""] || evt.newValue}</strong>
+                          </div>
+                        )}
+
+                        {evt.changeType === "new_posts" && (
+                          <div style={{ color: "#8effd0" }}>
+                            📝 Content Scraped: <strong>{evt.delta} new posts</strong> enqueued for AI intelligence
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Score History Timeline Modal */}
+      {historyUsername && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0, 0, 0, 0.6)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "2rem",
+          }}
+          onClick={() => setHistoryUsername(null)}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: "100%",
+              maxWidth: "600px",
+              padding: "2rem",
+              position: "relative",
+              animation: "fade-in 0.3s ease-out",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setHistoryUsername(null)}
+              style={{
+                position: "absolute",
+                top: "1.5rem",
+                right: "1.5rem",
+                background: "rgba(255, 255, 255, 0.08)",
+                border: "var(--glass-border)",
+                borderRadius: "50%",
+                width: "36px",
+                height: "36px",
+                color: "#fff",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: "bold",
+              }}
+            >
+              ✕
+            </button>
+
+            <h2 className="card-title">📈 Monitoring Timeline: @{historyUsername}</h2>
+
+            {historyLoading && (
+              <div className="table-loading-container" style={{ margin: "2rem 0" }}>
+                <div className="spinner"></div>
+                <p>Generating score timeline...</p>
+              </div>
+            )}
+
+            {historyError && <div className="toast toast-error">{historyError}</div>}
+
+            {userHistory && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+                
+                {/* Custom Visual Score Timeline Chart */}
+                <div>
+                  <h3 style={{ fontSize: "1rem", color: "#fff", marginBottom: "1rem" }}>Lead Score Progression</h3>
+                  {userHistory.history.length === 0 ? (
+                    <p style={{ color: "var(--color-text-dim)" }}>No historical scores recorded yet.</p>
+                  ) : (
+                    <div style={{ 
+                      display: "flex", 
+                      alignItems: "flex-end", 
+                      justifyContent: "space-between", 
+                      height: "150px", 
+                      padding: "1rem 0",
+                      background: "rgba(0, 0, 0, 0.2)",
+                      borderRadius: "8px",
+                      border: "var(--glass-border)"
+                    }}>
+                      {userHistory.history.map((hist: any, index: number) => (
+                        <div key={index} style={{ 
+                          display: "flex", 
+                          flexDirection: "column", 
+                          alignItems: "center",
+                          flex: 1
+                        }}>
+                          <span style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#fff", marginBottom: "0.4rem" }}>
+                            {hist.leadScore}
+                          </span>
+                          <div style={{ 
+                            width: "12px", 
+                            height: `${hist.leadScore}%`, 
+                            maxHeight: "100px",
+                            background: hist.leadScore >= 80 ? "linear-gradient(180deg, var(--color-primary) 0%, #7c22e4 100%)" : "linear-gradient(180deg, var(--color-accent) 0%, #00a2cc 100%)", 
+                            borderRadius: "6px 6px 0 0",
+                            boxShadow: "0 0 10px rgba(159, 62, 255, 0.2)"
+                          }}></div>
+                          <span style={{ fontSize: "0.65rem", color: "var(--color-text-dim)", marginTop: "0.4rem" }}>
+                            {new Date(hist.recordedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Score Log Timeline Feed */}
+                <div>
+                  <h3 style={{ fontSize: "1rem", color: "#fff", marginBottom: "1rem" }}>Telemetry Event History</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxHeight: "200px", overflowY: "auto" }}>
+                    {userHistory.events.length === 0 ? (
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.9rem" }}>No monitored events recorded.</p>
+                    ) : (
+                      userHistory.events.map((evt: any) => (
+                        <div key={evt._id} style={{ 
+                          fontSize: "0.85rem", 
+                          padding: "0.5rem 0.75rem", 
+                          background: "rgba(255, 255, 255, 0.02)", 
+                          borderRadius: "6px",
+                          border: "var(--glass-border)"
+                        }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", color: "var(--color-text-dim)", fontSize: "0.75rem" }}>
+                            <span>Event: {evt.changeType.replace(/_/g, " ").toUpperCase()}</span>
+                            <span>{new Date(evt.detectedAt).toLocaleDateString()}</span>
+                          </div>
+                          <p style={{ margin: "0.25rem 0 0 0", color: "#fff" }}>
+                            {evt.changeType === "lead_score_increase" && `Lead score grew by +${evt.delta} (from ${evt.oldValue} to ${evt.newValue})`}
+                            {evt.changeType === "category_change" && `Category shifted from ${evt.oldValue} to ${evt.newValue}`}
+                            {evt.changeType === "intent_change" && `Intent shifted from ${evt.oldValue} to ${evt.newValue}`}
+                            {evt.changeType === "new_posts" && `Sourced ${evt.delta} new posts for lead profiling`}
+                          </p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
               </div>
             )}
           </div>

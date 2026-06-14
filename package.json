@@ -9,6 +9,8 @@
     "scrape:profile": "bun run src/scraper/instagram.ts",
     "worker:scrape": "bun run src/workers/scrapeWorker.ts",
     "worker": "bun run src/workers/scrapeWorker.ts",
+    "worker:discover": "bun run src/workers/hashtagDiscoveryWorker.ts",
+    "worker:analyze": "bun run src/workers/aiAnalysisWorker.ts",
     "frontend": "bun --hot src/frontend/server.ts"
   },
   "devDependencies": {

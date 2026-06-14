@@ -3,6 +3,8 @@ import { connectToDatabase } from "./db";
 import jobsRouter from "./routes/jobs";
 import leadsRouter from "./routes/leads";
 import scrapeRouter from "./routes/scrape";
+import discoverRouter from "./routes/discover";
+import analysisRouter from "./routes/analysis";
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -27,6 +29,8 @@ app.get("/health", (req, res) => {
 app.use("/leads", leadsRouter);
 app.use("/scrape", scrapeRouter);
 app.use("/jobs", jobsRouter);
+app.use("/discover", discoverRouter);
+app.use("/analysis", analysisRouter);
 
 app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (res.headersSent) {

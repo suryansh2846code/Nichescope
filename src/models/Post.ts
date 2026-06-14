@@ -8,8 +8,8 @@ export interface PostAttrs {
   hashtags: string[];
   mentions: string[];
   postedAt?: Date;
-  likes?: number;
-  commentsCount?: number;
+  likes?: number | null;
+  commentsCount?: number | null;
   isAnalyzed?: boolean;
   scrapedAt: Date;
 }

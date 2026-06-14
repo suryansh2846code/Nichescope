@@ -92,11 +92,11 @@ export function parsePostMetaDescription(desc: string) {
   const fullMatch = trimmed.match(/^([\d.,KMBkmb]+)\s+likes?,\s+([\d.,KMBkmb]+)\s+comments?\s+-\s+([a-zA-Z0-9_.-]+)\s+on\s+([^:]+):\s*"(.*)"(?:\.|\s)*$/s);
   if (fullMatch) {
     return {
-      likes: parseInstagramCount(fullMatch[1]),
-      commentsCount: parseInstagramCount(fullMatch[2]),
-      username: fullMatch[3],
-      dateStr: fullMatch[4].trim(),
-      caption: fullMatch[5].trim(),
+      likes: parseInstagramCount(fullMatch[1] as string),
+      commentsCount: parseInstagramCount(fullMatch[2] as string),
+      username: fullMatch[3] as string,
+      dateStr: (fullMatch[4] as string).trim(),
+      caption: (fullMatch[5] as string).trim(),
     };
   }
 
@@ -104,11 +104,11 @@ export function parsePostMetaDescription(desc: string) {
   const likesOnlyMatch = trimmed.match(/^([\d.,KMBkmb]+)\s+likes?\s+-\s+([a-zA-Z0-9_.-]+)\s+on\s+([^:]+):\s*"(.*)"(?:\.|\s)*$/s);
   if (likesOnlyMatch) {
     return {
-      likes: parseInstagramCount(likesOnlyMatch[1]),
+      likes: parseInstagramCount(likesOnlyMatch[1] as string),
       commentsCount: null,
-      username: likesOnlyMatch[2],
-      dateStr: likesOnlyMatch[3].trim(),
-      caption: likesOnlyMatch[4].trim(),
+      username: likesOnlyMatch[2] as string,
+      dateStr: (likesOnlyMatch[3] as string).trim(),
+      caption: (likesOnlyMatch[4] as string).trim(),
     };
   }
 
@@ -117,10 +117,10 @@ export function parsePostMetaDescription(desc: string) {
   if (commentsOnlyMatch) {
     return {
       likes: null,
-      commentsCount: parseInstagramCount(commentsOnlyMatch[1]),
-      username: commentsOnlyMatch[2],
-      dateStr: commentsOnlyMatch[3].trim(),
-      caption: commentsOnlyMatch[4].trim(),
+      commentsCount: parseInstagramCount(commentsOnlyMatch[1] as string),
+      username: commentsOnlyMatch[2] as string,
+      dateStr: (commentsOnlyMatch[3] as string).trim(),
+      caption: (commentsOnlyMatch[4] as string).trim(),
     };
   }
 
@@ -130,9 +130,9 @@ export function parsePostMetaDescription(desc: string) {
     return {
       likes: null,
       commentsCount: null,
-      username: minimalMatch[1],
-      dateStr: minimalMatch[2].trim(),
-      caption: minimalMatch[3].trim(),
+      username: minimalMatch[1] as string,
+      dateStr: (minimalMatch[2] as string).trim(),
+      caption: (minimalMatch[3] as string).trim(),
     };
   }
 

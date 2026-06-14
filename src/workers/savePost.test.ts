@@ -48,14 +48,14 @@ describe("saveOrUpdatePosts", () => {
     // Verify normalization and persistence
     const dbPosts = await Post.find({ username: "test_user_posts" }).sort({ postId: 1 });
     expect(dbPosts.length).toBe(2);
-    expect(dbPosts[0].postId).toBe("post_id_1");
-    expect(dbPosts[0].caption).toContain("Learning TypeScript");
-    expect(dbPosts[0].likes).toBe(120);
-    expect(dbPosts[0].hashtags).toEqual(["coding", "webdev"]);
-    expect(dbPosts[0].mentions).toEqual(["mentor"]);
+    expect(dbPosts[0]!.postId).toBe("post_id_1");
+    expect(dbPosts[0]!.caption).toContain("Learning TypeScript");
+    expect(dbPosts[0]!.likes).toBe(120);
+    expect(dbPosts[0]!.hashtags).toEqual(["coding", "webdev"]);
+    expect(dbPosts[0]!.mentions).toEqual(["mentor"]);
 
-    expect(dbPosts[1].postId).toBe("post_id_2");
-    expect(dbPosts[1].likes).toBe(350);
+    expect(dbPosts[1]!.postId).toBe("post_id_2");
+    expect(dbPosts[1]!.likes).toBe(350);
   });
 
   test("updates existing posts without duplicating", async () => {

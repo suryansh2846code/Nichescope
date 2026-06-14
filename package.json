@@ -12,6 +12,7 @@
     "worker:discover": "bun run src/workers/hashtagDiscoveryWorker.ts",
     "worker:analyze": "bun run src/workers/aiAnalysisWorker.ts",
     "worker:user": "bun run src/workers/userIntelligenceWorker.ts",
+    "worker:embedding": "bun run src/workers/embeddingWorker.ts",
     "frontend": "bun --hot src/frontend/server.ts"
   },
   "devDependencies": {

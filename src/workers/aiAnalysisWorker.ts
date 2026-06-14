@@ -7,6 +7,7 @@ import { calculateLeadScore } from "../services/ai/scoring";
 import { PostAnalysis } from "../models/PostAnalysis";
 import { Post } from "../models/Post";
 import { userIntelligenceQueue, AGGREGATE_USER_JOB_NAME } from "../queues/userIntelligenceQueue";
+import { embeddingQueue, GENERATE_EMBEDDING_JOB_NAME } from "../queues/embeddingQueue";
 
 // Connect to MongoDB
 try {
@@ -109,6 +110,22 @@ export async function processAnalysisJob(job: {
   } catch (err) {
     console.error(
       `Failed to enqueue user intelligence job for @${username}:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+
+  // Enqueue post embedding generation task
+  try {
+    const cleanUser = username.toLowerCase();
+    await embeddingQueue.add(
+      GENERATE_EMBEDDING_JOB_NAME,
+      { postId, username: cleanUser },
+      { jobId: postId }
+    );
+    console.log(`Enqueued PostEmbedding generation for post ${postId}`);
+  } catch (err) {
+    console.error(
+      `Failed to enqueue embedding job for post ${postId}:`,
       err instanceof Error ? err.message : String(err)
     );
   }

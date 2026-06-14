@@ -71,7 +71,13 @@ interface PostAnalysisResult {
 
 export default function App() {
   // Navigation
-  const [activeTab, setActiveTab] = useState<"pipeline" | "ai" | "user">("pipeline");
+  const [activeTab, setActiveTab] = useState<"pipeline" | "ai" | "user" | "search">("pipeline");
+
+  // Semantic Search Tab State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   // Scrape Form State
   const [scrapeUsername, setScrapeUsername] = useState("");
@@ -230,6 +236,30 @@ export default function App() {
       setSelectedUserLoading(false);
     }
   }, []);
+
+  // Fetch Semantic Search Results
+  const fetchSearchResults = useCallback(async (queryStr: string) => {
+    if (!queryStr.trim()) return;
+    setSearchLoading(true);
+    setSearchError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/search?q=${encodeURIComponent(queryStr.trim())}`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch search results: ${res.statusText}`);
+      }
+      const data = await res.json();
+      setSearchResults(data);
+    } catch (err) {
+      setSearchError(err instanceof Error ? err.message : "Error performing semantic search");
+    } finally {
+      setSearchLoading(false);
+    }
+  }, []);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    fetchSearchResults(searchQuery);
+  };
 
   // Initial load and filter reload
   useEffect(() => {
@@ -444,6 +474,12 @@ export default function App() {
           onClick={() => setActiveTab("user")}
         >
           👤 User Intelligence
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "search" ? "active" : ""}`}
+          onClick={() => setActiveTab("search")}
+        >
+          🔍 Semantic Search
         </button>
       </div>
 
@@ -1415,6 +1451,192 @@ export default function App() {
                     ))}
                   </div>
                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "search" && (
+        <div className="ai-dashboard animate-slide-in">
+          {/* Stats Row */}
+          <div className="ai-stats-row">
+            <div className="stat-card">
+              <span className="stat-card-label">Query</span>
+              <span className="stat-card-value" style={{ fontSize: "1.2rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {searchQuery || "None"}
+              </span>
+              <span className="stat-card-desc">Active search phrase</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-card-label">Matches Found</span>
+              <span className="stat-card-value">
+                {searchResults.length}
+              </span>
+              <span className="stat-card-desc">Unique relevant users</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-card-label">Max Similarity</span>
+              <span className="stat-card-value">
+                {searchResults.length > 0 ? `${(searchResults[0].similarity * 100).toFixed(0)}%` : "0%"}
+              </span>
+              <span className="stat-card-desc">Highest cosine score</span>
+            </div>
+            <div className="stat-card">
+              <span className="stat-card-label">Top Category</span>
+              <span className="stat-card-value" style={{ fontSize: "1.2rem", textTransform: "capitalize" }}>
+                {searchResults[0]?.category || "N/A"}
+              </span>
+              <span className="stat-card-desc">Category of best match</span>
+            </div>
+          </div>
+
+          {/* Search Input Card */}
+          <div className="glass-card" style={{ padding: "2rem", marginBottom: "2rem" }}>
+            <h2 className="card-title">🔍 Semantic Lead Search Engine</h2>
+            <p style={{ color: "var(--color-text-dim)", marginBottom: "1.5rem", fontSize: "0.95rem" }}>
+              Search for prospects by intent and meaning rather than keywords. Example: <em>"people looking for skin treatment"</em> or <em>"hiring developer"</em>.
+            </p>
+            <form onSubmit={handleSearchSubmit} style={{ display: "flex", gap: "1rem" }}>
+              <input
+                type="text"
+                placeholder="Describe who or what you are looking for..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  flex: 1,
+                  background: "rgba(0, 0, 0, 0.3)",
+                  border: "var(--glass-border)",
+                  borderRadius: "8px",
+                  color: "#fff",
+                  padding: "0.75rem 1rem",
+                  fontSize: "1.1rem",
+                  fontFamily: "var(--font-sans)",
+                }}
+              />
+              <button
+                type="submit"
+                className={`btn btn-primary ${searchLoading ? "loading" : ""}`}
+                disabled={searchLoading}
+                style={{ minWidth: "150px" }}
+              >
+                {searchLoading ? "Searching..." : "Search"}
+              </button>
+            </form>
+            {searchError && <div className="toast toast-error" style={{ marginTop: "1rem" }}>{searchError}</div>}
+          </div>
+
+          {/* Results Grid */}
+          <div className="glass-card card-table" style={{ padding: "1.5rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+              <h2 className="card-title" style={{ margin: 0 }}>🎯 Semantic Matches</h2>
+              {searchResults.length > 0 && (
+                <span style={{ fontSize: "0.9rem", color: "var(--color-text-dim)" }}>
+                  Found {searchResults.length} matches (capped at 50)
+                </span>
+              )}
+            </div>
+
+            {searchLoading && (
+              <div className="table-loading-container" style={{ margin: "3rem 0" }}>
+                <div className="spinner"></div>
+                <p>Generating query vector & computing cosine similarities...</p>
+              </div>
+            )}
+
+            {!searchLoading && !searchError && searchResults.length === 0 && (
+              <div className="empty-state">
+                <div className="empty-state-icon">🔍</div>
+                <h3>No Semantic Results to Display</h3>
+                <p>Type a search query above and hit Search to find matched leads by meaning.</p>
+              </div>
+            )}
+
+            {!searchLoading && !searchError && searchResults.length > 0 && (
+              <div className="ai-leads-grid">
+                {searchResults.map((item) => (
+                  <div key={item.postId} className="ai-lead-card">
+                    {/* Similarity and Score Badge */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", alignItems: "center" }}>
+                      <div className={getScoreBadgeClass(item.leadScore)} title="Lead Score">
+                        {item.leadScore}
+                      </div>
+                      <div style={{ 
+                        fontSize: "0.8rem", 
+                        fontWeight: "bold", 
+                        color: "#a4f2ff", 
+                        background: "rgba(164, 242, 255, 0.1)", 
+                        padding: "0.2rem 0.5rem", 
+                        borderRadius: "12px",
+                        textAlign: "center"
+                      }}>
+                        {(item.similarity * 100).toFixed(1)}% Sim
+                      </div>
+                    </div>
+                    
+                    {/* Lead details */}
+                    <div className="ai-lead-details">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span className="ai-lead-user" style={{ fontSize: "1.2rem" }}>
+                          @{item.username}
+                        </span>
+                      </div>
+                      
+                      <div className="ai-lead-meta" style={{ marginTop: "0.5rem" }}>
+                        <span className={getCategoryBadgeClass(item.category)}>
+                          {item.category}
+                        </span>
+                        <span className="ai-intent-badge">
+                          {intentDisplayNames[item.intent] || item.intent}
+                        </span>
+                      </div>
+                      
+                      <div style={{ marginTop: "1rem" }}>
+                        <span style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", textTransform: "uppercase", fontWeight: "bold" }}>
+                          User Summary:
+                        </span>
+                        <p className="ai-lead-summary" style={{ marginTop: "0.25rem", marginBottom: "0.5rem" }}>
+                          {item.summary}
+                        </p>
+                      </div>
+
+                      <div style={{
+                        marginTop: "0.5rem",
+                        padding: "0.75rem",
+                        background: "rgba(0, 0, 0, 0.2)",
+                        borderLeft: "3px solid var(--color-primary, #9f3eff)",
+                        borderRadius: "0 8px 8px 0"
+                      }}>
+                        <span style={{ fontSize: "0.75rem", color: "var(--color-text-dim)", textTransform: "uppercase", fontWeight: "bold" }}>
+                          Best Match Caption:
+                        </span>
+                        <p style={{ fontSize: "0.9rem", color: "#fff", margin: "0.25rem 0 0 0", fontStyle: "italic", whiteSpace: "pre-wrap" }}>
+                          "{item.caption}"
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                      <button
+                        onClick={() => fetchSingleUserDetails(item.username)}
+                        className="btn btn-primary"
+                        style={{ padding: "0.6rem 1.2rem", fontSize: "0.85rem", whiteSpace: "nowrap" }}
+                      >
+                        Inspect Profile 👤
+                      </button>
+                      <a
+                        href={`https://instagram.com/p/${item.postId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn-secondary"
+                        style={{ padding: "0.6rem 1.2rem", fontSize: "0.85rem", whiteSpace: "nowrap", textAlign: "center" }}
+                      >
+                        View Post 🔗
+                      </a>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>

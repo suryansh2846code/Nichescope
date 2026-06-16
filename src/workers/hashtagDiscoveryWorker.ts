@@ -20,6 +20,7 @@ try {
 const worker = new Worker<DiscoveryJobData>(
   DISCOVERY_QUEUE_NAME,
   async (job) => {
+    console.log("[WORKER RECEIVED]", job.data);
     const rawHashtag = job.data.hashtag;
     const keywords = rawHashtag
       .split(/[\s,+#]+/)
@@ -94,6 +95,11 @@ const worker = new Worker<DiscoveryJobData>(
             continue;
           }
 
+          console.log("[DISCOVERY SAVE]", {
+            hashtag: cleanHashtag,
+            username: username
+          });
+
           // 3. Save to HashtagDiscovery DB collection
           await HashtagDiscovery.create({
             hashtag: cleanHashtag,
@@ -103,10 +109,15 @@ const worker = new Worker<DiscoveryJobData>(
           });
 
           // 4. Enqueue into scrapeQueue
-          await scrapeQueue.add(SCRAPE_PROFILE_JOB_NAME, {
-            username: username,
-            niche: cleanHashtag,
-          });
+          const scrapeJobId = `scrape-${username}-${Date.now()}`;
+          await scrapeQueue.add(
+            SCRAPE_PROFILE_JOB_NAME,
+            {
+              username: username,
+              niche: cleanHashtag,
+            },
+            { jobId: scrapeJobId }
+          );
 
           enqueuedCount++;
         } catch (err) {

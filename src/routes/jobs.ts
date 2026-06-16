@@ -13,9 +13,17 @@ router.get("/:id", async (req, res, next) => {
       return;
     }
 
-    let job: any = await scrapeQueue.getJob(id);
-    if (!job) {
+    let job: any = null;
+    if (id.startsWith("discover-")) {
       job = await discoveryQueue.getJob(id);
+      if (!job) {
+        job = await scrapeQueue.getJob(id);
+      }
+    } else {
+      job = await scrapeQueue.getJob(id);
+      if (!job) {
+        job = await discoveryQueue.getJob(id);
+      }
     }
 
     if (!job) {

@@ -7,6 +7,14 @@ export async function connectToDatabase() {
     throw new Error("MONGO_URI is required");
   }
 
+  mongoose.connection.on("connected", () => {
+    console.log("Mongoose connected to MongoDB successfully");
+  });
+
+  mongoose.connection.on("error", (err) => {
+    console.error(`Mongoose connection error occurred: ${err instanceof Error ? err.message : String(err)}`);
+  });
+
   await mongoose.connect(mongoUri, {
     serverSelectionTimeoutMS: 5000,
   });

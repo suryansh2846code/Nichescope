@@ -149,6 +149,7 @@ export default function App() {
 
   // Hashtag Discovery State
   const [hashtagInput, setHashtagInput] = useState("");
+  const [activeDiscoveryKeyword, setActiveDiscoveryKeyword] = useState("");
   const [submittingHashtag, setSubmittingHashtag] = useState(false);
   const [hashtagError, setHashtagError] = useState<string | null>(null);
   const [discoveredUsers, setDiscoveredUsers] = useState<any[]>([]);
@@ -238,18 +239,23 @@ export default function App() {
       setHashtagError("Hashtag/Keywords are required");
       return;
     }
+    console.log("[UI INPUT]", rawInput);
+    setActiveDiscoveryKeyword(rawInput);
     setSubmittingHashtag(true);
     try {
+      const payload = { hashtag: rawInput };
+      console.log("[UI SUBMIT]", payload);
       const res = await fetch(`${API_BASE_URL}/discover/hashtag`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hashtag: rawInput })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) {
         const errData = await res.json();
         throw new Error(errData.error || `Error starting discovery: ${res.statusText}`);
       }
       const data = await res.json();
+      console.log("[UI JOB ID]", data.jobId);
       setActiveJobId(data.jobId);
       setTimeout(() => {
         fetchDiscoveredUsers(rawInput);
@@ -511,8 +517,8 @@ export default function App() {
         if (data.state === "completed" || data.state === "failed") {
           clearInterval(intervalId);
           setActiveJobId(null);
-          if (hashtagInput) {
-            fetchDiscoveredUsers(hashtagInput);
+          if (activeDiscoveryKeyword) {
+            fetchDiscoveredUsers(activeDiscoveryKeyword);
           }
         }
       } catch (err) {
@@ -526,7 +532,7 @@ export default function App() {
     intervalId = setInterval(pollJob, 2000);
 
     return () => clearInterval(intervalId);
-  }, [activeJobId, hashtagInput]);
+  }, [activeJobId, activeDiscoveryKeyword]);
 
   const getScoreBadgeClass = (score: number) => {
     if (score >= 80) return "score-badge-circle score-badge-high";
@@ -977,7 +983,7 @@ export default function App() {
 
               {/* Keyword Discovered users */}
               <div className="glass-card card-table">
-                <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>Discovered Accounts via #{hashtagInput || "None"}</h3>
+                <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>Discovered Accounts via #{activeDiscoveryKeyword || "None"}</h3>
                 {discoveredUsers.length === 0 ? (
                   <div style={{ textAlign: "center", padding: "3rem", color: "var(--color-text-dim)" }}>
                     No users discovered from the active session yet. Run the scraper to pull accounts.

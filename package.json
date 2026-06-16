@@ -14,7 +14,6 @@
     "worker:user": "bun run src/workers/userIntelligenceWorker.ts",
     "worker:embedding": "bun run src/workers/embeddingWorker.ts",
     "worker:monitoring": "bun run src/workers/monitoringWorker.ts",
-    "worker:market": "bun run src/workers/marketIntelligenceWorker.ts",
     "worker:qualification": "bun run src/workers/leadQualificationWorker.ts",
     "frontend": "bun --hot src/frontend/server.ts"
   },

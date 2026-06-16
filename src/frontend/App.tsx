@@ -69,9 +69,26 @@ interface PostAnalysisResult {
   analyzedAt: string;
 }
 
+interface LeadPipelineResult {
+  _id: string;
+  username: string;
+  status: "new" | "contacted" | "interested" | "qualified" | "converted" | "lost";
+  priority: "low" | "medium" | "high";
+  assignedTo?: string;
+  notes: { content: string; createdAt: string }[];
+  tags: string[];
+  lastActivityAt: string;
+  createdAt: string;
+  updatedAt: string;
+  problem: string;
+  serviceNeeded: string;
+  buyingIntent: number;
+  leadScore: number;
+}
+
 export default function App() {
   // Navigation
-  const [activeTab, setActiveTab] = useState<"pipeline" | "ai" | "user" | "search" | "monitoring" | "market" | "inbox">("pipeline");
+  const [activeTab, setActiveTab] = useState<"pipeline" | "ai" | "user" | "search" | "monitoring" | "market" | "inbox" | "crm">("pipeline");
 
   // Lead Inbox Tab State
   const [qualifiedLeads, setQualifiedLeads] = useState<any[]>([]);
@@ -87,6 +104,28 @@ export default function App() {
   const [selectedInboxLeadDetails, setSelectedInboxLeadDetails] = useState<any | null>(null);
   const [selectedInboxLeadLoading, setSelectedInboxLeadLoading] = useState(false);
   const [selectedInboxLeadError, setSelectedInboxLeadError] = useState<string | null>(null);
+
+  // CRM Pipeline Tab State
+  const [crmLeads, setCrmLeads] = useState<LeadPipelineResult[]>([]);
+  const [crmStats, setCrmStats] = useState<any | null>(null);
+  const [crmActivity, setCrmActivity] = useState<any[]>([]);
+  const [crmLoading, setCrmLoading] = useState(false);
+  const [crmError, setCrmError] = useState<string | null>(null);
+
+  // CRM Filters
+  const [crmFilterStatus, setCrmFilterStatus] = useState("");
+  const [crmFilterPriority, setCrmFilterPriority] = useState("");
+  const [crmFilterAssignedTo, setCrmFilterAssignedTo] = useState("");
+
+  // CRM Lead Details Drawer/Modal
+  const [selectedCrmUsername, setSelectedCrmUsername] = useState<string | null>(null);
+  const [selectedCrmDetails, setSelectedCrmDetails] = useState<any | null>(null);
+  const [selectedCrmLoading, setSelectedCrmLoading] = useState(false);
+  const [selectedCrmError, setSelectedCrmError] = useState<string | null>(null);
+
+  // CRM Form Inputs
+  const [noteContent, setNoteContent] = useState("");
+  const [tagInput, setTagInput] = useState("");
 
   // Telemetry Monitoring State
   const [monitoringConfigs, setMonitoringConfigs] = useState<any[]>([]);
@@ -497,6 +536,147 @@ export default function App() {
     }
   }, [activeTab, fetchInboxLeads]);
 
+  const fetchCrmData = useCallback(async () => {
+    setCrmLoading(true);
+    setCrmError(null);
+    try {
+      const queryParams = new URLSearchParams();
+      if (crmFilterStatus) queryParams.append("status", crmFilterStatus);
+      if (crmFilterPriority) queryParams.append("priority", crmFilterPriority);
+      if (crmFilterAssignedTo.trim()) queryParams.append("assignedTo", crmFilterAssignedTo.trim());
+
+      const [leadsRes, statsRes, activityRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/crm/leads?${queryParams.toString()}`),
+        fetch(`${API_BASE_URL}/crm/stats`),
+        fetch(`${API_BASE_URL}/crm/activity`)
+      ]);
+
+      if (!leadsRes.ok || !statsRes.ok || !activityRes.ok) {
+        throw new Error("Failed to fetch CRM dataset from backend");
+      }
+
+      const [leadsData, statsData, activityData] = await Promise.all([
+        leadsRes.json(),
+        statsRes.json(),
+        activityRes.json()
+      ]);
+
+      setCrmLeads(leadsData);
+      setCrmStats(statsData);
+      setCrmActivity(activityData);
+    } catch (err) {
+      setCrmError(err instanceof Error ? err.message : "Error fetching CRM data");
+    } finally {
+      setCrmLoading(false);
+    }
+  }, [crmFilterStatus, crmFilterPriority, crmFilterAssignedTo]);
+
+  const fetchCrmLeadDetails = useCallback(async (username: string) => {
+    setSelectedCrmUsername(username);
+    setSelectedCrmLoading(true);
+    setSelectedCrmError(null);
+    setSelectedCrmDetails(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/crm/leads/${username}`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch CRM details for @${username}`);
+      }
+      const data = await res.json();
+      setSelectedCrmDetails(data);
+    } catch (err) {
+      setSelectedCrmError(err instanceof Error ? err.message : `Error fetching details for @${username}`);
+    } finally {
+      setSelectedCrmLoading(false);
+    }
+  }, []);
+
+  const handleUpdateCrmStatus = async (username: string, status: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/crm/leads/${username}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status })
+      });
+      if (!res.ok) throw new Error("Failed to update status");
+      
+      fetchCrmData();
+      if (selectedCrmUsername && selectedCrmUsername.toLowerCase() === username.toLowerCase()) {
+        fetchCrmLeadDetails(username);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error updating status");
+    }
+  };
+
+  const handleAssignCrmLead = async (username: string, assignedTo: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/crm/leads/${username}/assign`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignedTo })
+      });
+      if (!res.ok) throw new Error("Failed to assign lead");
+      
+      fetchCrmData();
+      if (selectedCrmUsername && selectedCrmUsername.toLowerCase() === username.toLowerCase()) {
+        fetchCrmLeadDetails(username);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error assigning lead");
+    }
+  };
+
+  const handleAddCrmNote = async (e: React.FormEvent, username: string) => {
+    e.preventDefault();
+    if (!noteContent.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/crm/leads/${username}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: noteContent.trim() })
+      });
+      if (!res.ok) throw new Error("Failed to add note");
+      
+      setNoteContent("");
+      fetchCrmData();
+      if (selectedCrmUsername && selectedCrmUsername.toLowerCase() === username.toLowerCase()) {
+        fetchCrmLeadDetails(username);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error adding note");
+    }
+  };
+
+  const handleAddCrmTag = async (e: React.FormEvent, username: string) => {
+    e.preventDefault();
+    if (!tagInput.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/crm/leads/${username}/tags`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag: tagInput.trim() })
+      });
+      if (!res.ok) throw new Error("Failed to add tag");
+      
+      setTagInput("");
+      fetchCrmData();
+      if (selectedCrmUsername && selectedCrmUsername.toLowerCase() === username.toLowerCase()) {
+        fetchCrmLeadDetails(username);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error adding tag");
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "crm") {
+      const timer = setTimeout(() => {
+        fetchCrmData();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab, fetchCrmData]);
+
   // Monitoring load and reload
   useEffect(() => {
     if (activeTab === "monitoring") {
@@ -751,6 +931,66 @@ export default function App() {
     );
   };
 
+  const renderCrmLeadCard = (lead: LeadPipelineResult) => {
+    const getPriorityColor = (prio: string) => {
+      if (prio === "high") return "#ff4566";
+      if (prio === "medium") return "#ffb600";
+      return "#00baff";
+    };
+
+    return (
+      <div
+        key={lead._id}
+        className="glass-card"
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", lead.username);
+        }}
+        style={{
+          padding: "1rem",
+          background: "rgba(255, 255, 255, 0.02)",
+          border: "var(--glass-border)",
+          transition: "transform 0.2s ease, box-shadow 0.2s ease",
+          cursor: "grab",
+          marginBottom: "0.75rem",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+          <span style={{ fontWeight: "bold", color: "#fff", fontSize: "0.95rem" }}>@{lead.username}</span>
+          <span style={{
+            fontSize: "0.7rem",
+            fontWeight: "bold",
+            color: getPriorityColor(lead.priority),
+            background: `${getPriorityColor(lead.priority)}15`,
+            padding: "0.15rem 0.35rem",
+            borderRadius: "4px",
+            textTransform: "uppercase"
+          }}>
+            {lead.priority}
+          </span>
+        </div>
+
+        <p style={{ margin: "0.2rem 0", color: "#ddd", fontSize: "0.85rem" }}>
+          <strong>Need:</strong> {lead.serviceNeeded}
+        </p>
+        
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.75rem", fontSize: "0.75rem" }}>
+          <div style={{ display: "flex", gap: "0.5rem", color: "var(--color-text-dim)" }}>
+            <span>🎯 Intent: <strong>{lead.buyingIntent}%</strong></span>
+            <span>🔥 Score: <strong>{lead.leadScore}</strong></span>
+          </div>
+          <button
+            onClick={() => fetchCrmLeadDetails(lead.username)}
+            className="btn btn-secondary"
+            style={{ padding: "0.25rem 0.5rem", fontSize: "0.7rem", minWidth: "auto", margin: 0 }}
+          >
+            Manage
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="dashboard-container">
       {/* Header */}
@@ -810,6 +1050,12 @@ export default function App() {
           onClick={() => setActiveTab("inbox")}
         >
           📥 CRM Lead Inbox
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "crm" ? "active" : ""}`}
+          onClick={() => setActiveTab("crm")}
+        >
+          📂 CRM Pipeline
         </button>
       </div>
 
@@ -2755,6 +3001,336 @@ export default function App() {
         </div>
       )}
 
+      {activeTab === "crm" && (
+        <div className="crm-container animate-fade-in" style={{ padding: "0 1rem" }}>
+          
+          {/* Header/Controls bar */}
+          <div className="glass-card" style={{ padding: "1.5rem", marginBottom: "2rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
+              <div>
+                <h2 style={{ fontSize: "1.5rem", fontWeight: "bold", margin: 0, color: "#fff" }}>💼 CRM Lead Pipeline</h2>
+                <p style={{ margin: "0.25rem 0 0 0", color: "var(--color-text-dim)", fontSize: "0.9rem" }}>
+                  Manage status stages, assignees, tags, and internal notes for qualified leads.
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: "0.75rem" }}>
+                <button
+                  onClick={() => fetchCrmData()}
+                  className="btn btn-primary"
+                  style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+                  disabled={crmLoading}
+                >
+                  🔄 Refresh CRM Data
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Inputs Grid */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "1rem",
+              marginTop: "1.5rem",
+              paddingTop: "1.5rem",
+              borderTop: "1px solid rgba(255, 255, 255, 0.08)"
+            }}>
+              <div>
+                <label style={{ display: "block", fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "0.5rem", fontWeight: "bold" }}>
+                  Filter by Status
+                </label>
+                <select
+                  value={crmFilterStatus}
+                  onChange={(e) => setCrmFilterStatus(e.target.value)}
+                  className="input-field"
+                  style={{ width: "100%", margin: 0 }}
+                >
+                  <option value="">All Statuses</option>
+                  <option value="new">New</option>
+                  <option value="contacted">Contacted</option>
+                  <option value="interested">Interested</option>
+                  <option value="qualified">Qualified</option>
+                  <option value="converted">Converted</option>
+                  <option value="lost">Lost</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "0.5rem", fontWeight: "bold" }}>
+                  Filter by Priority
+                </label>
+                <select
+                  value={crmFilterPriority}
+                  onChange={(e) => setCrmFilterPriority(e.target.value)}
+                  className="input-field"
+                  style={{ width: "100%", margin: 0 }}
+                >
+                  <option value="">All Priorities</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "0.5rem", fontWeight: "bold" }}>
+                  Filter by Assignee
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Alice"
+                  value={crmFilterAssignedTo}
+                  onChange={(e) => setCrmFilterAssignedTo(e.target.value)}
+                  className="input-field"
+                  style={{ width: "100%", margin: 0 }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Analytical Status Overview Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "1rem", marginBottom: "1.5rem" }}>
+            <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #fff" }}>
+              <div style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", textTransform: "uppercase" }}>New</div>
+              <div style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#fff" }}>
+                {crmStats?.new || 0}
+              </div>
+            </div>
+            <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid var(--color-accent)" }}>
+              <div style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", textTransform: "uppercase" }}>Contacted</div>
+              <div style={{ fontSize: "1.8rem", fontWeight: "bold", color: "var(--color-accent)" }}>
+                {crmStats?.contacted || 0}
+              </div>
+            </div>
+            <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid var(--color-primary)" }}>
+              <div style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", textTransform: "uppercase" }}>Interested / Qualified</div>
+              <div style={{ fontSize: "1.8rem", fontWeight: "bold", color: "var(--color-primary)" }}>
+                {(crmStats?.interested || 0) + (crmStats?.qualified || 0)}
+              </div>
+            </div>
+            <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #22c55e" }}>
+              <div style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", textTransform: "uppercase" }}>Converted</div>
+              <div style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#22c55e" }}>
+                {crmStats?.converted || 0}
+              </div>
+            </div>
+            <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #ff4566" }}>
+              <div style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", textTransform: "uppercase" }}>Lost</div>
+              <div style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#ff4566" }}>
+                {crmStats?.lost || 0}
+              </div>
+            </div>
+            <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #eab308" }}>
+              <div style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", textTransform: "uppercase" }}>Conversion Rate</div>
+              <div style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#eab308" }}>
+                {crmStats?.conversionRate != null ? `${crmStats.conversionRate.toFixed(1)}%` : "0.0%"}
+              </div>
+            </div>
+          </div>
+
+          {crmError && <div className="toast toast-error">{crmError}</div>}
+
+          {crmLoading ? (
+            <div style={{ textAlign: "center", padding: "3rem 0" }}>
+              <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
+              <p style={{ color: "var(--color-text-dim)" }}>Loading CRM Pipeline...</p>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: "1.5rem", alignItems: "start" }}>
+              
+              {/* Left Column: High Priority Queue & Activity Feed */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                
+                {/* High Priority leads panel */}
+                <div className="glass-card" style={{ padding: "1.25rem", borderLeft: "4px solid #ff4566" }}>
+                  <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#fff", marginTop: 0, marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>🔥 High Priority Leads</span>
+                    <span style={{ fontSize: "0.75rem", background: "rgba(255, 69, 102, 0.15)", color: "#ff4566", padding: "0.15rem 0.4rem", borderRadius: "8px" }}>
+                      {crmLeads.filter(l => l.priority === "high").length}
+                    </span>
+                  </h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxHeight: "400px", overflowY: "auto", paddingRight: "0.25rem" }}>
+                    {crmLeads
+                      .filter(l => l.priority === "high")
+                      .sort((a, b) => b.buyingIntent - a.buyingIntent || b.leadScore - a.leadScore || new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime())
+                      .map(lead => renderCrmLeadCard(lead))}
+                    {crmLeads.filter(l => l.priority === "high").length === 0 && (
+                      <div style={{ textAlign: "center", color: "var(--color-text-dim)", padding: "1.5rem 0", fontSize: "0.85rem" }}>
+                        No high priority leads.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Global Activity Feed */}
+                <div className="glass-card" style={{ padding: "1.25rem" }}>
+                  <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#fff", marginTop: 0, marginBottom: "1rem" }}>
+                    📜 Global CRM Activity
+                  </h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxHeight: "350px", overflowY: "auto", paddingRight: "0.25rem" }}>
+                    {crmActivity.map((act) => {
+                      const displayType = (type: string) => {
+                        switch(type) {
+                          case "created": return "🆕 Created";
+                          case "assigned": return "👤 Assigned";
+                          case "note_added": return "📝 Note Added";
+                          case "status_changed": return "⚡ Stage Change";
+                          case "converted": return "🎉 Converted";
+                          case "lost": return "❌ Lost";
+                          case "escalated": return "🔥 Escalated";
+                          default: return type;
+                        }
+                      };
+                      return (
+                        <div key={act._id} style={{ 
+                          fontSize: "0.8rem", 
+                          padding: "0.5rem 0.75rem", 
+                          background: "rgba(255,255,255,0.01)", 
+                          border: "1px solid rgba(255,255,255,0.05)", 
+                          borderRadius: "6px" 
+                        }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", color: "#fff", marginBottom: "0.15rem" }}>
+                            <span>@{act.username}</span>
+                            <span style={{ fontSize: "0.7rem", color: "var(--color-accent)" }}>{displayType(act.type)}</span>
+                          </div>
+                          {act.type === "status_changed" && (
+                            <div style={{ color: "var(--color-text-dim)" }}>
+                              Status: <span style={{ textDecoration: "line-through" }}>{act.oldValue}</span> → <strong>{act.newValue}</strong>
+                            </div>
+                          )}
+                          {act.type === "assigned" && (
+                            <div style={{ color: "var(--color-text-dim)" }}>
+                              Assignee: <span style={{ textDecoration: "line-through" }}>{act.oldValue || "Unassigned"}</span> → <strong>{act.newValue || "Unassigned"}</strong>
+                            </div>
+                          )}
+                          {act.type === "note_added" && (
+                            <div style={{ color: "#eee", fontStyle: "italic" }}>
+                              "{act.newValue}"
+                            </div>
+                          )}
+                          {act.type === "escalated" && (
+                            <div style={{ color: "#ff4566" }}>
+                              Score increased by <strong>{act.newValue}</strong> pts! Priority escalated.
+                            </div>
+                          )}
+                          <div style={{ fontSize: "0.7rem", color: "var(--color-text-dim)", marginTop: "0.25rem", textAlign: "right" }}>
+                            {new Date(act.createdAt).toLocaleString()}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {crmActivity.length === 0 && (
+                      <div style={{ textAlign: "center", color: "var(--color-text-dim)", padding: "1.5rem 0", fontSize: "0.85rem" }}>
+                        No CRM activities logged.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Right Column: Kanban board grid */}
+              <div>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(6, 1fr)",
+                  gap: "0.75rem",
+                  alignItems: "start",
+                  overflowX: "auto",
+                  paddingBottom: "1rem"
+                }}>
+                  
+                  {/* Status Columns mapping */}
+                  {(["new", "contacted", "interested", "qualified", "converted", "lost"] as const).map((colStatus) => {
+                    const leadsInCol = crmLeads.filter(l => l.status === colStatus);
+                    
+                    const getColColor = (status: string) => {
+                      switch(status) {
+                        case "new": return "#fff";
+                        case "contacted": return "var(--color-accent)";
+                        case "interested": return "var(--color-primary)";
+                        case "qualified": return "#7c22e4";
+                        case "converted": return "#22c55e";
+                        case "lost": return "#ff4566";
+                        default: return "#fff";
+                      }
+                    };
+
+                    const getColTitle = (status: string) => {
+                      switch(status) {
+                        case "new": return "New";
+                        case "contacted": return "Contacted";
+                        case "interested": return "Interested";
+                        case "qualified": return "Qualified";
+                        case "converted": return "Converted";
+                        case "lost": return "Lost";
+                        default: return status;
+                      }
+                    };
+
+                    return (
+                      <div
+                        key={colStatus}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const username = e.dataTransfer.getData("text/plain");
+                          if (username) {
+                            handleUpdateCrmStatus(username, colStatus);
+                          }
+                        }}
+                        className="glass-card"
+                        style={{
+                          background: "rgba(255, 255, 255, 0.01)",
+                          border: "var(--glass-border)",
+                          borderTop: `4px solid ${getColColor(colStatus)}`,
+                          padding: "0.75rem",
+                          minHeight: "500px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.5rem"
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
+                          <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: getColColor(colStatus) }}>
+                            {getColTitle(colStatus)}
+                          </span>
+                          <span style={{ fontSize: "0.75rem", background: "rgba(255,255,255,0.08)", color: "#fff", padding: "0.1rem 0.35rem", borderRadius: "6px" }}>
+                            {leadsInCol.length}
+                          </span>
+                        </div>
+
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", flex: 1, overflowY: "auto", maxHeight: "600px" }}>
+                          {leadsInCol.map(lead => renderCrmLeadCard(lead))}
+                          {leadsInCol.length === 0 && (
+                            <div style={{ 
+                              flex: 1, 
+                              display: "flex", 
+                              alignItems: "center", 
+                              justifyContent: "center", 
+                              color: "var(--color-text-dim)", 
+                              fontSize: "0.75rem", 
+                              border: "1px dashed rgba(255,255,255,0.05)", 
+                              borderRadius: "6px",
+                              padding: "2rem 0",
+                              textAlign: "center"
+                            }}>
+                              Drag leads here
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                </div>
+              </div>
+
+            </div>
+          )}
+
+        </div>
+      )}
+
       {/* Qualified Lead Deep-dive Modal */}
       {selectedInboxLeadUsername && (
         <div
@@ -2952,6 +3528,292 @@ export default function App() {
 
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* CRM Lead Detail Modal */}
+      {selectedCrmUsername && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0, 0, 0, 0.6)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "2rem",
+          }}
+          onClick={() => setSelectedCrmUsername(null)}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: "100%",
+              maxWidth: "800px",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              padding: "2rem",
+              position: "relative",
+              animation: "fade-in 0.3s ease-out",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setSelectedCrmUsername(null)}
+              style={{
+                position: "absolute",
+                top: "1.5rem",
+                right: "1.5rem",
+                background: "rgba(255, 255, 255, 0.08)",
+                border: "var(--glass-border)",
+                borderRadius: "50%",
+                width: "36px",
+                height: "36px",
+                color: "#fff",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: "bold",
+              }}
+            >
+              ✕
+            </button>
+
+            <h2 className="card-title" style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1.5rem" }}>
+              💼 CRM Lead Profile: @{selectedCrmUsername}
+            </h2>
+
+            {selectedCrmLoading && (
+              <div style={{ textAlign: "center", padding: "2rem" }}>
+                <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
+                <p style={{ color: "var(--color-text-dim)" }}>Loading lead profile...</p>
+              </div>
+            )}
+
+            {selectedCrmError && <div className="toast toast-error">{selectedCrmError}</div>}
+
+            {selectedCrmDetails && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginTop: "1rem" }}>
+                
+                {/* Left Side: Profile Details & Updates */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                  
+                  {/* Summary & Metrics */}
+                  <div className="glass-card" style={{ padding: "1rem", background: "rgba(255,255,255,0.02)" }}>
+                    <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
+                      📊 Lead Metrics
+                    </h3>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", fontSize: "0.9rem" }}>
+                      <div>🔥 Lead Score: <strong>{selectedCrmDetails.qualification?.leadScore || 0}</strong></div>
+                      <div>🎯 Intent Score: <strong>{selectedCrmDetails.qualification?.buyingIntent || 0}%</strong></div>
+                      <div style={{ gridColumn: "span 2" }}>💡 Problem: <strong>{selectedCrmDetails.qualification?.problem || "Unknown"}</strong></div>
+                      <div style={{ gridColumn: "span 2" }}>🛠️ Need: <strong>{selectedCrmDetails.qualification?.serviceNeeded || "Unknown"}</strong></div>
+                    </div>
+                  </div>
+
+                  {/* Actions & Ownership Updates */}
+                  <div className="glass-card" style={{ padding: "1rem" }}>
+                    <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
+                      ⚙️ Manage Lead
+                    </h3>
+                    
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.75rem", color: "var(--color-text-dim)", marginBottom: "0.25rem", fontWeight: "bold" }}>
+                          Status Stage
+                        </label>
+                        <select
+                          value={selectedCrmDetails.pipeline?.status || "new"}
+                          onChange={(e) => handleUpdateCrmStatus(selectedCrmUsername, e.target.value)}
+                          className="input-field"
+                          style={{ width: "100%", margin: 0 }}
+                        >
+                          <option value="new">New</option>
+                          <option value="contacted">Contacted</option>
+                          <option value="interested">Interested</option>
+                          <option value="qualified">Qualified</option>
+                          <option value="converted">Converted</option>
+                          <option value="lost">Lost</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: "block", fontSize: "0.75rem", color: "var(--color-text-dim)", marginBottom: "0.25rem", fontWeight: "bold" }}>
+                          Assignee
+                        </label>
+                        <div style={{ display: "flex", gap: "0.5rem" }}>
+                          <input
+                            type="text"
+                            placeholder="Unassigned"
+                            defaultValue={selectedCrmDetails.pipeline?.assignedTo || ""}
+                            onBlur={(e) => handleAssignCrmLead(selectedCrmUsername, e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                handleAssignCrmLead(selectedCrmUsername, (e.target as HTMLInputElement).value);
+                              }
+                            }}
+                            className="input-field"
+                            style={{ width: "100%", margin: 0 }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Metadata Tags */}
+                  <div className="glass-card" style={{ padding: "1rem" }}>
+                    <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
+                      🏷️ Tags
+                    </h3>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "0.75rem" }}>
+                      {(selectedCrmDetails.pipeline?.tags || []).map((tag: string, idx: number) => (
+                        <span key={idx} style={{
+                          fontSize: "0.75rem",
+                          background: "rgba(255,255,255,0.08)",
+                          border: "var(--glass-border)",
+                          padding: "0.15rem 0.4rem",
+                          borderRadius: "4px",
+                          color: "#fff"
+                        }}>
+                          {tag}
+                        </span>
+                      ))}
+                      {(!selectedCrmDetails.pipeline?.tags || selectedCrmDetails.pipeline.tags.length === 0) && (
+                        <span style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>No tags added yet.</span>
+                      )}
+                    </div>
+                    <form onSubmit={(e) => handleAddCrmTag(e, selectedCrmUsername)} style={{ display: "flex", gap: "0.5rem" }}>
+                      <input
+                        type="text"
+                        placeholder="Add tag..."
+                        value={tagInput}
+                        onChange={(e) => setTagInput(e.target.value)}
+                        className="input-field"
+                        style={{ width: "100%", margin: 0, padding: "0.3rem 0.5rem", fontSize: "0.85rem" }}
+                      />
+                      <button type="submit" className="btn btn-secondary" style={{ padding: "0.3rem 0.75rem", minWidth: "auto", margin: 0 }}>
+                        Add
+                      </button>
+                    </form>
+                  </div>
+
+                </div>
+
+                {/* Right Side: Timeline, Internal Notes & Log Feed */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                  
+                  {/* Internal Notes */}
+                  <div className="glass-card" style={{ padding: "1rem" }}>
+                    <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
+                      📝 Internal Notes
+                    </h3>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", maxHeight: "150px", overflowY: "auto", marginBottom: "0.75rem", paddingRight: "0.25rem" }}>
+                      {(selectedCrmDetails.pipeline?.notes || []).map((note: any, idx: number) => (
+                        <div key={idx} style={{ 
+                          background: "rgba(255,255,255,0.02)", 
+                          padding: "0.5rem 0.75rem", 
+                          borderRadius: "6px",
+                          border: "1px solid rgba(255,255,255,0.04)"
+                        }}>
+                          <p style={{ margin: 0, fontSize: "0.85rem", color: "#eee", whiteSpace: "pre-wrap" }}>{note.content}</p>
+                          <div style={{ fontSize: "0.7rem", color: "var(--color-text-dim)", marginTop: "0.25rem", textAlign: "right" }}>
+                            {new Date(note.createdAt).toLocaleString()}
+                          </div>
+                        </div>
+                      ))}
+                      {(!selectedCrmDetails.pipeline?.notes || selectedCrmDetails.pipeline.notes.length === 0) && (
+                        <div style={{ textAlign: "center", color: "var(--color-text-dim)", fontSize: "0.8rem", padding: "1rem 0" }}>No notes yet.</div>
+                      )}
+                    </div>
+                    <form onSubmit={(e) => handleAddCrmNote(e, selectedCrmUsername)} style={{ display: "flex", gap: "0.5rem" }}>
+                      <input
+                        type="text"
+                        placeholder="Type a new note..."
+                        value={noteContent}
+                        onChange={(e) => setNoteContent(e.target.value)}
+                        className="input-field"
+                        style={{ width: "100%", margin: 0, padding: "0.3rem 0.5rem", fontSize: "0.85rem" }}
+                      />
+                      <button type="submit" className="btn btn-secondary" style={{ padding: "0.3rem 0.75rem", minWidth: "auto", margin: 0 }}>
+                        Save
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Activity History feed */}
+                  <div className="glass-card" style={{ padding: "1rem" }}>
+                    <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
+                      📜 Activity Log
+                    </h3>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", maxHeight: "180px", overflowY: "auto", paddingRight: "0.25rem" }}>
+                      {(selectedCrmDetails.activity || []).map((act: any) => {
+                        const displayType = (type: string) => {
+                          switch(type) {
+                            case "created": return "🆕 Created";
+                            case "assigned": return "👤 Assigned";
+                            case "note_added": return "📝 Note Added";
+                            case "status_changed": return "⚡ Stage Change";
+                            case "converted": return "🎉 Converted";
+                            case "lost": return "❌ Lost";
+                            case "escalated": return "🔥 Escalated";
+                            default: return type;
+                          }
+                        };
+                        return (
+                          <div key={act._id} style={{ 
+                            fontSize: "0.8rem", 
+                            padding: "0.4rem 0.6rem", 
+                            background: "rgba(255,255,255,0.01)", 
+                            border: "1px solid rgba(255,255,255,0.04)", 
+                            borderRadius: "4px" 
+                          }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", color: "#fff", marginBottom: "0.1rem" }}>
+                              <span>{displayType(act.type)}</span>
+                              <span style={{ fontSize: "0.7rem", color: "var(--color-text-dim)" }}>
+                                {new Date(act.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+                            {act.type === "status_changed" && (
+                              <div style={{ color: "var(--color-text-dim)" }}>
+                                <span style={{ textDecoration: "line-through" }}>{act.oldValue}</span> → <strong>{act.newValue}</strong>
+                              </div>
+                            )}
+                            {act.type === "assigned" && (
+                              <div style={{ color: "var(--color-text-dim)" }}>
+                                <span style={{ textDecoration: "line-through" }}>{act.oldValue || "Unassigned"}</span> → <strong>{act.newValue || "Unassigned"}</strong>
+                              </div>
+                            )}
+                            {act.type === "note_added" && (
+                              <div style={{ color: "#eee", fontStyle: "italic" }}>
+                                "{act.newValue}"
+                              </div>
+                            )}
+                            {act.type === "escalated" && (
+                              <div style={{ color: "#ff4566" }}>
+                                Escalated by <strong>{act.newValue}</strong> pts! Priority escalated to high.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {(!selectedCrmDetails.activity || selectedCrmDetails.activity.length === 0) && (
+                        <div style={{ textAlign: "center", color: "var(--color-text-dim)", fontSize: "0.8rem", padding: "1rem 0" }}>No actions logged.</div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+            )}
+
           </div>
         </div>
       )}

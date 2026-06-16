@@ -21,74 +21,130 @@ const worker = new Worker<DiscoveryJobData>(
   DISCOVERY_QUEUE_NAME,
   async (job) => {
     const rawHashtag = job.data.hashtag;
-    const cleanHashtag = rawHashtag.replace(/^#/, "").trim().toLowerCase();
-    console.log(`Starting hashtag discovery job ${job.id} for #${cleanHashtag}`);
-    await job.updateProgress(10);
+    const keywords = rawHashtag
+      .split(/[\s,+#]+/)
+      .map((k: string) => k.trim().toLowerCase())
+      .filter(Boolean);
 
-    const result = await scrapeHashtag(cleanHashtag, { maxPosts: 50 });
-    await job.updateProgress(60);
+    if (keywords.length === 0) {
+      throw new Error("No valid keywords found");
+    }
+
+    console.log(`Starting hashtag discovery job ${job.id} for keywords: ${keywords.join(", ")}`);
 
     let enqueuedCount = 0;
     let skippedCount = 0;
 
-    console.log(`Processing ${result.discoveries.length} discovered users for #${cleanHashtag}...`);
+    const keywordWeight = 100 / keywords.length;
 
-    for (const discovery of result.discoveries) {
-      try {
-        const username = discovery.username.toLowerCase();
+    for (let kIdx = 0; kIdx < keywords.length; kIdx++) {
+      const cleanHashtag = keywords[kIdx]!;
+      console.log(`[Keyword ${kIdx + 1}/${keywords.length}] Scraping #${cleanHashtag}`);
 
-        // 1. Check if user already exists in the leads collection
-        const leadExists = await Lead.exists({
-          username: new RegExp(`^${username}$`, "i"),
-        });
+      const progressBase = kIdx * keywordWeight;
 
-        if (leadExists) {
-          skippedCount++;
-          continue;
+      // Update progress: starting scraping
+      await job.updateProgress({
+        percent: Math.floor(progressBase + keywordWeight * 0.1),
+        currentKeyword: cleanHashtag,
+        added: enqueuedCount,
+        skipped: skippedCount,
+        currentIndex: 0,
+        totalCount: 0,
+      });
+
+      const result = await scrapeHashtag(cleanHashtag, { maxPosts: 50 });
+
+      // Update progress: finished scraping, starting processing
+      await job.updateProgress({
+        percent: Math.floor(progressBase + keywordWeight * 0.5),
+        currentKeyword: cleanHashtag,
+        added: enqueuedCount,
+        skipped: skippedCount,
+        currentIndex: 0,
+        totalCount: result.discoveries.length,
+      });
+
+      let current = 0;
+      const total = result.discoveries.length;
+
+      for (const discovery of result.discoveries) {
+        try {
+          const username = discovery.username.toLowerCase();
+
+          // 1. Check if user already exists in the leads collection
+          const leadExists = await Lead.exists({
+            username: new RegExp(`^${username}$`, "i"),
+          });
+
+          if (leadExists) {
+            skippedCount++;
+            current++;
+            continue;
+          }
+
+          // 2. Check if user already exists in the discoveries collection
+          const discoveryExists = await HashtagDiscovery.exists({
+            username: new RegExp(`^${username}$`, "i"),
+          });
+
+          if (discoveryExists) {
+            skippedCount++;
+            current++;
+            continue;
+          }
+
+          // 3. Save to HashtagDiscovery DB collection
+          await HashtagDiscovery.create({
+            hashtag: cleanHashtag,
+            username: username,
+            sourcePostUrl: discovery.sourcePostUrl,
+            discoveredAt: new Date(),
+          });
+
+          // 4. Enqueue into scrapeQueue
+          await scrapeQueue.add(SCRAPE_PROFILE_JOB_NAME, {
+            username: username,
+            niche: cleanHashtag,
+          });
+
+          enqueuedCount++;
+        } catch (err) {
+          console.error(
+            `Error enqueuing discovered username "${discovery.username}":`,
+            err instanceof Error ? err.message : String(err)
+          );
         }
 
-        // 2. Check if user already exists in the discoveries collection
-        const discoveryExists = await HashtagDiscovery.exists({
-          username: new RegExp(`^${username}$`, "i"),
+        current++;
+
+        // Update progress after each account is added one by one
+        const processProgress = (current / total) * 0.5;
+        await job.updateProgress({
+          percent: Math.floor(progressBase + keywordWeight * (0.5 + processProgress)),
+          currentKeyword: cleanHashtag,
+          currentUsername: discovery.username,
+          currentIndex: current,
+          totalCount: total,
+          added: enqueuedCount,
+          skipped: skippedCount,
         });
-
-        if (discoveryExists) {
-          skippedCount++;
-          continue;
-        }
-
-        // 3. Save to HashtagDiscovery DB collection
-        await HashtagDiscovery.create({
-          hashtag: cleanHashtag,
-          username: username,
-          sourcePostUrl: discovery.sourcePostUrl,
-          discoveredAt: new Date(),
-        });
-
-        // 4. Enqueue into scrapeQueue
-        await scrapeQueue.add(SCRAPE_PROFILE_JOB_NAME, {
-          username: username,
-          niche: cleanHashtag,
-        });
-
-        enqueuedCount++;
-      } catch (err) {
-        // Log individual error but continue processing other discoveries
-        console.error(
-          `Error enqueuing discovered username "${discovery.username}":`,
-          err instanceof Error ? err.message : String(err)
-        );
       }
     }
 
-    await job.updateProgress(100);
+    // Update final progress to 100%
+    await job.updateProgress({
+      percent: 100,
+      added: enqueuedCount,
+      skipped: skippedCount,
+    });
+
     console.log(
-      `Finished hashtag discovery job ${job.id} for #${cleanHashtag}. Enqueued: ${enqueuedCount}, Skipped (duplicates): ${skippedCount}`
+      `Finished hashtag discovery job ${job.id} for keywords: ${keywords.join(", ")}. Enqueued: ${enqueuedCount}, Skipped: ${skippedCount}`
     );
 
     return {
-      hashtag: cleanHashtag,
-      discoveredCount: result.discoveries.length,
+      keywords,
       enqueuedCount,
       skippedCount,
       status: "success",

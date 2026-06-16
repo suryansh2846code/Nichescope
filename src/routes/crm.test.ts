@@ -48,9 +48,7 @@ describe("CRM Pipeline API Endpoints", () => {
       assignedTo: "",
       notes: [],
       tags: [],
-      lastActivityAt: new Date(),
-      createdAt: new Date(),
-      updatedAt: new Date()
+      lastActivityAt: new Date()
     });
 
     await UserIntelligence.create({
@@ -155,9 +153,9 @@ describe("CRM Pipeline API Endpoints", () => {
 
     const activity = await LeadActivity.find({ username: testUser }).sort({ createdAt: -1 });
     expect(activity.length).toBe(2);
-    expect(activity[0].type).toBe("converted");
-    expect(activity[0].oldValue).toBe("new");
-    expect(activity[0].newValue).toBe("converted");
+    expect(activity[0]!.type).toBe("converted");
+    expect(activity[0]!.oldValue).toBe("new");
+    expect(activity[0]!.newValue).toBe("converted");
   });
 
   test("PATCH /crm/leads/:username/assign updates assignee and logs activity", async () => {
@@ -168,9 +166,9 @@ describe("CRM Pipeline API Endpoints", () => {
 
     const activity = await LeadActivity.find({ username: testUser }).sort({ createdAt: -1 });
     expect(activity.length).toBe(2);
-    expect(activity[0].type).toBe("assigned");
-    expect(activity[0].oldValue).toBe("");
-    expect(activity[0].newValue).toBe("Alice");
+    expect(activity[0]!.type).toBe("assigned");
+    expect(activity[0]!.oldValue).toBe("");
+    expect(activity[0]!.newValue).toBe("Alice");
   });
 
   test("POST /crm/leads/:username/notes appends note and logs activity", async () => {
@@ -182,8 +180,8 @@ describe("CRM Pipeline API Endpoints", () => {
 
     const activity = await LeadActivity.find({ username: testUser }).sort({ createdAt: -1 });
     expect(activity.length).toBe(2);
-    expect(activity[0].type).toBe("note_added");
-    expect(activity[0].newValue).toBe("Needs urgent follow-up");
+    expect(activity[0]!.type).toBe("note_added");
+    expect(activity[0]!.newValue).toBe("Needs urgent follow-up");
   });
 
   test("POST /crm/leads/:username/tags appends tag", async () => {

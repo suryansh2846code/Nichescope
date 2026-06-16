@@ -11,6 +11,7 @@ import { startMonitoringScheduler } from "./services/trends/scheduler";
 import monitoringRouter from "./routes/monitoring";
 import { startMarketScheduler } from "./services/market/marketScheduler";
 import marketRouter from "./routes/market";
+import crmRouter from "./routes/crm";
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -41,6 +42,7 @@ app.use("/users", usersRouter);
 app.use("/search", searchRouter);
 app.use("/monitoring", monitoringRouter);
 app.use("/market", marketRouter);
+app.use("/crm", crmRouter);
 
 app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (res.headersSent) {

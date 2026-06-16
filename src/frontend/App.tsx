@@ -21,10 +21,19 @@ interface Job {
   id: string;
   name: string;
   state: "waiting" | "active" | "completed" | "failed" | "delayed" | "unknown";
-  progress: number;
+  progress: number | {
+    percent: number;
+    currentKeyword?: string;
+    currentUsername?: string;
+    currentIndex?: number;
+    totalCount?: number;
+    added: number;
+    skipped: number;
+  };
   data: {
-    username: string;
-    niche: string;
+    username?: string;
+    hashtag?: string;
+    niche?: string;
   };
   attemptsMade: number;
   failedReason?: string;
@@ -224,9 +233,9 @@ export default function App() {
   const handleHashtagDiscoverySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setHashtagError(null);
-    const cleanHashtag = hashtagInput.replace(/^#/, "").trim().toLowerCase();
-    if (!cleanHashtag) {
-      setHashtagError("Hashtag is required");
+    const rawInput = hashtagInput.trim();
+    if (!rawInput) {
+      setHashtagError("Hashtag/Keywords are required");
       return;
     }
     setSubmittingHashtag(true);
@@ -234,7 +243,7 @@ export default function App() {
       const res = await fetch(`${API_BASE_URL}/discover/hashtag`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hashtag: cleanHashtag })
+        body: JSON.stringify({ hashtag: rawInput })
       });
       if (!res.ok) {
         const errData = await res.json();
@@ -243,7 +252,7 @@ export default function App() {
       const data = await res.json();
       setActiveJobId(data.jobId);
       setTimeout(() => {
-        fetchDiscoveredUsers(cleanHashtag);
+        fetchDiscoveredUsers(rawInput);
       }, 3000);
     } catch (err) {
       setHashtagError(err instanceof Error ? err.message : "Failed to trigger keyword discovery");
@@ -928,12 +937,38 @@ export default function App() {
                     {jobError && <div style={{ color: "var(--color-error)", fontSize: "0.8rem" }}>Error: {jobError}</div>}
                     {activeJobId && !job && <p style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>Starting job queue...</p>}
                     {job && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.8rem" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", fontSize: "0.8rem" }}>
                         <div>Status: <span style={{ color: "var(--color-accent)" }}>{job.state.toUpperCase()}</span></div>
-                        <div>Progress: {job.progress}%</div>
-                        <div style={{ width: "100%", height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
-                          <div style={{ width: `${job.progress}%`, height: "100%", background: "var(--color-primary)" }}></div>
-                        </div>
+                        {typeof job.progress === "object" && job.progress !== null ? (
+                          <>
+                            <div>Progress: {job.progress.percent}%</div>
+                            <div style={{ width: "100%", height: "6px", background: "rgba(255,255,255,0.1)", borderRadius: "3px", overflow: "hidden" }}>
+                              <div style={{ width: `${job.progress.percent}%`, height: "100%", background: "var(--color-primary)", transition: "width 0.3s ease" }}></div>
+                            </div>
+                            {job.progress.currentKeyword && (
+                              <div style={{ color: "var(--color-text-dim)", marginTop: "0.25rem" }}>
+                                🏷️ Keyword: <strong style={{ color: "#fff" }}>#{job.progress.currentKeyword}</strong>
+                              </div>
+                            )}
+                            {job.progress.currentUsername && (
+                              <div style={{ color: "var(--color-accent)", marginTop: "0.25rem", display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                                <div className="spinner" style={{ width: "12px", height: "12px", borderWidth: "1.5px" }}></div>
+                                <span>Processing: <strong>@{job.progress.currentUsername}</strong> ({job.progress.currentIndex}/{job.progress.totalCount})</span>
+                              </div>
+                            )}
+                            <div style={{ display: "flex", gap: "1rem", marginTop: "0.25rem" }}>
+                              <span style={{ color: "#4ade80", fontWeight: "500" }}>✓ Added: {job.progress.added}</span>
+                              <span style={{ color: "var(--color-text-dim)" }}>⤳ Skipped: {job.progress.skipped}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div>Progress: {job.progress}%</div>
+                            <div style={{ width: "100%", height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
+                              <div style={{ width: `${job.progress}%`, height: "100%", background: "var(--color-primary)", transition: "width 0.3s ease" }}></div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>

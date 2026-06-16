@@ -7,6 +7,8 @@ import { Post } from "../models/Post";
 import { PostAnalysis } from "../models/PostAnalysis";
 import { LeadQualification } from "../models/LeadQualification";
 import { getAIProvider } from "../services/ai/AIProvider";
+import { LeadPipeline } from "../models/LeadPipeline";
+import { LeadActivity } from "../models/LeadActivity";
 
 // Connect to MongoDB
 try {
@@ -71,6 +73,9 @@ export async function processLeadQualificationJob(job: {
   const leadPosts = await Post.find({ postId: { $in: postIds } });
   const supportingPosts = leadPosts.map((p) => p.postUrl).filter(Boolean);
 
+  // Fetch any existing LeadQualification to compare scores for automation
+  const oldQual = await LeadQualification.findOne({ username: normalizedUser });
+
   // 6. Save or Update LeadQualification
   await LeadQualification.findOneAndUpdate(
     { username: normalizedUser },
@@ -91,6 +96,64 @@ export async function processLeadQualificationJob(job: {
     },
     { upsert: true, returnDocument: "after" }
   );
+
+  // 7. CRM initialization and automation hooks
+  try {
+    let targetPriority: "low" | "medium" | "high" = "low";
+    if (result.buyingIntent > 85) {
+      targetPriority = "high";
+    } else if (result.buyingIntent > 60) {
+      targetPriority = "medium";
+    }
+
+    const existingPipeline = await LeadPipeline.findOne({ username: normalizedUser });
+    if (!existingPipeline) {
+      // Create new LeadPipeline with default status 'new' and calculated priority
+      await LeadPipeline.create({
+        username: normalizedUser,
+        status: "new",
+        priority: targetPriority,
+        notes: [],
+        tags: [],
+        lastActivityAt: new Date(),
+      });
+
+      // Record 'created' LeadActivity
+      await LeadActivity.create({
+        username: normalizedUser,
+        type: "created",
+        newValue: "new",
+        createdAt: new Date(),
+      });
+      console.log(`Initialized CRM LeadPipeline for @${normalizedUser} with status new and priority ${targetPriority}`);
+    } else {
+      // Automate priority escalation when lead score increases significantly (>= 20 points)
+      if (oldQual) {
+        const oldScore = oldQual.leadScore || 0;
+        const newScore = userIntel.leadScore || 0;
+        if (newScore - oldScore >= 20) {
+          existingPipeline.priority = "high";
+          existingPipeline.lastActivityAt = new Date();
+          await existingPipeline.save();
+
+          // Record 'lead_score_changed' LeadActivity
+          await LeadActivity.create({
+            username: normalizedUser,
+            type: "lead_score_changed",
+            oldValue: String(oldScore),
+            newValue: String(newScore),
+            createdAt: new Date(),
+          });
+          console.log(`CRM automation triggered: lead score increased significantly (+${newScore - oldScore}) for @${normalizedUser}. priority -> high.`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(
+      `Error in CRM initialization/automation for @${normalizedUser}:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
 
   await job.updateProgress(100);
   console.log(

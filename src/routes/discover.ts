@@ -10,6 +10,7 @@ const router = Router();
 
 router.post("/hashtag", async (req, res, next) => {
   try {
+    console.log("[DISCOVERY REQUEST]", req.body);
     const { hashtag } = req.body as Partial<DiscoveryJobData>;
 
     if (!hashtag || typeof hashtag !== "string") {
@@ -19,9 +20,19 @@ router.post("/hashtag", async (req, res, next) => {
 
     const cleanHashtag = hashtag.replace(/^#/, "").trim().toLowerCase();
 
-    const job = await discoveryQueue.add(DISCOVER_HASHTAG_JOB_NAME, {
-      hashtag: cleanHashtag,
-    });
+    // Drain discovery queue to avoid queue backlog
+    await discoveryQueue.drain(true);
+
+    const payload = { hashtag: cleanHashtag };
+    console.log("[QUEUE PAYLOAD]", payload);
+
+    const jobId = `discover-${cleanHashtag}-${Date.now()}`;
+
+    const job = await discoveryQueue.add(
+      DISCOVER_HASHTAG_JOB_NAME,
+      payload,
+      { jobId }
+    );
 
     res.status(202).json({
       jobId: job.id,

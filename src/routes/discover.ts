@@ -41,10 +41,13 @@ router.get("/hashtag/:hashtag", async (req, res, next) => {
       return;
     }
 
-    const cleanHashtag = hashtag.replace(/^#/, "").trim().toLowerCase();
+    const keywords = hashtag
+      .split(/[\s,+#]+/)
+      .map(k => k.trim().toLowerCase())
+      .filter(Boolean);
 
     const discoveries = await HashtagDiscovery.find(
-      { hashtag: cleanHashtag },
+      { hashtag: { $in: keywords } },
       { username: 1, _id: 0 }
     );
 

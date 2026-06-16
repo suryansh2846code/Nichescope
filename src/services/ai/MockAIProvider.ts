@@ -116,4 +116,74 @@ export class MockAIProvider implements AIProvider {
     const summary = `User repeatedly discusses ${detectedCategory} and ${behavior}.`;
     return summary.slice(0, 250);
   }
+
+  async qualifyLead(
+    username: string,
+    summary: string,
+    category: string,
+    intent: string,
+    leadScore: number,
+    captions: string[]
+  ): Promise<import("./AIProvider").LeadQualificationResult> {
+    const text = (summary + " " + captions.join(" ")).toLowerCase();
+
+    if (text.includes("acne") || text.includes("dermatologist") || text.includes("skin")) {
+      return {
+        problem: "Acne",
+        serviceNeeded: "Dermatologist",
+        urgency: "high",
+        buyingIntent: 92,
+        confidence: 95,
+        qualificationReason: "User repeatedly asks for dermatologist recommendations.",
+      };
+    }
+
+    if (text.includes("fitness") || text.includes("gym") || text.includes("workout") || text.includes("trainer")) {
+      return {
+        problem: "Weight gain",
+        serviceNeeded: "Personal Trainer",
+        urgency: "medium",
+        buyingIntent: 75,
+        confidence: 85,
+        qualificationReason: "User is looking for personal trainer and fitness suggestions.",
+      };
+    }
+
+    if (text.includes("house") || text.includes("rent") || text.includes("apartment") || text.includes("home")) {
+      return {
+        problem: "Apartment search",
+        serviceNeeded: "Real Estate Agent",
+        urgency: "medium",
+        buyingIntent: 70,
+        confidence: 90,
+        qualificationReason: "User is looking to rent an apartment.",
+      };
+    }
+
+    if (
+      text.includes("job") ||
+      text.includes("career") ||
+      text.includes("hiring") ||
+      text.includes("recruiter") ||
+      text.includes("coding")
+    ) {
+      return {
+        problem: "Job search",
+        serviceNeeded: "Recruiter",
+        urgency: "high",
+        buyingIntent: 88,
+        confidence: 92,
+        qualificationReason: "User is actively seeking job opportunities.",
+      };
+    }
+
+    return {
+      problem: "General inquiry",
+      serviceNeeded: "Consultant",
+      urgency: "low",
+      buyingIntent: 40,
+      confidence: 80,
+      qualificationReason: "User is discussing general topics.",
+    };
+  }
 }

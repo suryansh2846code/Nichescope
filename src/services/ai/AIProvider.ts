@@ -8,9 +8,26 @@ export interface AnalysisResult {
   sentiment: "positive" | "neutral" | "negative";
 }
 
+export interface LeadQualificationResult {
+  problem: string;
+  serviceNeeded: string;
+  urgency: "low" | "medium" | "high";
+  buyingIntent: number;
+  confidence: number;
+  qualificationReason: string;
+}
+
 export interface AIProvider {
   analyzeCaption(caption: string): Promise<AnalysisResult>;
   generateUserSummary(captions: string[]): Promise<string>;
+  qualifyLead(
+    username: string,
+    summary: string,
+    category: string,
+    intent: string,
+    leadScore: number,
+    captions: string[]
+  ): Promise<LeadQualificationResult>;
 }
 
 import { MockAIProvider } from "./MockAIProvider";

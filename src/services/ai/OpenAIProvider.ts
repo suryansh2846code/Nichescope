@@ -165,4 +165,167 @@ Your response must be direct, plain text, and must strictly not exceed 250 chara
       return `User has active posts. Discussed topics: ${captions.slice(0, 3).join(", ").slice(0, 150)}...`.slice(0, 250);
     }
   }
+
+  async qualifyLead(
+    username: string,
+    summary: string,
+    category: string,
+    intent: string,
+    leadScore: number,
+    captions: string[]
+  ): Promise<import("./AIProvider").LeadQualificationResult> {
+    const systemPrompt = `You are an AI lead qualification agent. Analyze the user's category, intent, summary, score, and their recent Instagram captions to extract their specific problem, service needed, urgency, buying intent, confidence, and a qualification reason.
+
+Urgency Values:
+- low
+- medium
+- high
+
+Buying Intent Score:
+- A number from 0 to 100 representing their readiness to purchase or contact.
+  - Question only -> around 20
+  - Seeking recommendations -> around 70
+  - Actively searching / Urgent help needed -> around 90+
+
+Confidence Score:
+- A number from 0 to 100 representing classification confidence.
+
+Return a STRICT JSON response in this exact format with no markdown wrappers:
+{
+  "problem": "Acne",
+  "serviceNeeded": "Dermatologist",
+  "urgency": "high",
+  "buyingIntent": 92,
+  "confidence": 95,
+  "qualificationReason": "User repeatedly asks for dermatologist recommendations."
+}`;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${this.apiKey}`,
+    };
+
+    if (this.endpointUrl.includes("openrouter.ai")) {
+      headers["HTTP-Referer"] = "https://github.com/suryansh2846code/Nichescope";
+      headers["X-Title"] = "Nichescope";
+    }
+
+    try {
+      const userPrompt = `User Profile details:
+- Username: ${username}
+- Category: ${category}
+- Intent: ${intent}
+- Lead Score: ${leadScore}
+- Summary: ${summary}
+
+Recent captions:
+${captions.map((c, i) => `${i + 1}. ${c}`).join("\n")}`;
+
+      const response = await fetch(this.endpointUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: this.modelName,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.1,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`LLM provider error (status ${response.status}): ${errText}`);
+      }
+
+      const resData = (await response.json()) as any;
+      const textResult = resData.choices?.[0]?.message?.content;
+
+      if (!textResult) {
+        throw new Error("Empty response content from LLM provider");
+      }
+
+      const parsed = JSON.parse(textResult) as import("./AIProvider").LeadQualificationResult;
+
+      // Clean up values
+      let urgency: "low" | "medium" | "high" = "medium";
+      if (parsed.urgency === "low" || parsed.urgency === "medium" || parsed.urgency === "high") {
+        urgency = parsed.urgency;
+      }
+
+      return {
+        problem: typeof parsed.problem === "string" ? parsed.problem : "General issue",
+        serviceNeeded: typeof parsed.serviceNeeded === "string" ? parsed.serviceNeeded : "Consultant",
+        urgency,
+        buyingIntent: typeof parsed.buyingIntent === "number" ? parsed.buyingIntent : 50,
+        confidence: typeof parsed.confidence === "number" ? parsed.confidence : 80,
+        qualificationReason: typeof parsed.qualificationReason === "string" ? parsed.qualificationReason : "Analyzed profile.",
+      };
+    } catch (err) {
+      console.error("Failed during AI lead qualification request, falling back to mock provider logic:", err);
+      // Inline fallback logic matching MockAIProvider's qualifyLead Heuristics
+      const text = (summary + " " + captions.join(" ")).toLowerCase();
+
+      if (text.includes("acne") || text.includes("dermatologist") || text.includes("skin")) {
+        return {
+          problem: "Acne",
+          serviceNeeded: "Dermatologist",
+          urgency: "high",
+          buyingIntent: 92,
+          confidence: 95,
+          qualificationReason: "User repeatedly asks for dermatologist recommendations.",
+        };
+      }
+
+      if (text.includes("fitness") || text.includes("gym") || text.includes("workout") || text.includes("trainer")) {
+        return {
+          problem: "Weight gain",
+          serviceNeeded: "Personal Trainer",
+          urgency: "medium",
+          buyingIntent: 75,
+          confidence: 85,
+          qualificationReason: "User is looking for personal trainer and fitness suggestions.",
+        };
+      }
+
+      if (text.includes("house") || text.includes("rent") || text.includes("apartment") || text.includes("home")) {
+        return {
+          problem: "Apartment search",
+          serviceNeeded: "Real Estate Agent",
+          urgency: "medium",
+          buyingIntent: 70,
+          confidence: 90,
+          qualificationReason: "User is looking to rent an apartment.",
+        };
+      }
+
+      if (
+        text.includes("job") ||
+        text.includes("career") ||
+        text.includes("hiring") ||
+        text.includes("recruiter") ||
+        text.includes("coding")
+      ) {
+        return {
+          problem: "Job search",
+          serviceNeeded: "Recruiter",
+          urgency: "high",
+          buyingIntent: 88,
+          confidence: 92,
+          qualificationReason: "User is actively seeking job opportunities.",
+        };
+      }
+
+      return {
+        problem: "General inquiry",
+        serviceNeeded: "Consultant",
+        urgency: "low",
+        buyingIntent: 40,
+        confidence: 80,
+        qualificationReason: "User is discussing general topics.",
+      };
+    }
+  }
 }

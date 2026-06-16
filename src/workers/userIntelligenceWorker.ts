@@ -9,6 +9,7 @@ import { getAIProvider } from "../services/ai/AIProvider";
 import { LeadScoreHistory } from "../models/LeadScoreHistory";
 import { ChangeEvent } from "../models/ChangeEvent";
 import { UserMonitoring } from "../models/UserMonitoring";
+import { leadQualificationQueue, QUALIFY_LEAD_JOB_NAME } from "../queues/leadQualificationQueue";
 
 // Connect to MongoDB
 try {
@@ -20,12 +21,13 @@ try {
   process.exit(1);
 }
 
-const provider = getAIProvider();
+
 
 export async function processUserIntelligenceJob(job: {
   data: UserIntelligenceJobData;
   updateProgress: (progress: number) => Promise<any>;
 }) {
+  const provider = getAIProvider();
   const { username } = job.data;
   const normalizedUser = username.toLowerCase().trim();
   console.log(`Starting User Intelligence aggregation for @${normalizedUser}`);
@@ -235,6 +237,21 @@ export async function processUserIntelligenceJob(job: {
   } catch (err) {
     console.error(
       `Error in change detection logic for @${normalizedUser}:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+
+  // 10. Enqueue lead qualification job
+  try {
+    await leadQualificationQueue.add(
+      QUALIFY_LEAD_JOB_NAME,
+      { username: normalizedUser },
+      { jobId: normalizedUser }
+    );
+    console.log(`Enqueued LeadQualification for user @${normalizedUser}`);
+  } catch (err) {
+    console.error(
+      `Failed to enqueue lead qualification job for @${normalizedUser}:`,
       err instanceof Error ? err.message : String(err)
     );
   }

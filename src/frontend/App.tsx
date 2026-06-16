@@ -71,7 +71,22 @@ interface PostAnalysisResult {
 
 export default function App() {
   // Navigation
-  const [activeTab, setActiveTab] = useState<"pipeline" | "ai" | "user" | "search" | "monitoring" | "market">("pipeline");
+  const [activeTab, setActiveTab] = useState<"pipeline" | "ai" | "user" | "search" | "monitoring" | "market" | "inbox">("pipeline");
+
+  // Lead Inbox Tab State
+  const [qualifiedLeads, setQualifiedLeads] = useState<any[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxError, setInboxError] = useState<string | null>(null);
+
+  const [inboxUrgency, setInboxUrgency] = useState("");
+  const [inboxCategory, setInboxCategory] = useState("");
+  const [inboxMinIntent, setInboxMinIntent] = useState("");
+  const [inboxService, setInboxService] = useState("");
+
+  const [selectedInboxLeadUsername, setSelectedInboxLeadUsername] = useState<string | null>(null);
+  const [selectedInboxLeadDetails, setSelectedInboxLeadDetails] = useState<any | null>(null);
+  const [selectedInboxLeadLoading, setSelectedInboxLeadLoading] = useState(false);
+  const [selectedInboxLeadError, setSelectedInboxLeadError] = useState<string | null>(null);
 
   // Telemetry Monitoring State
   const [monitoringConfigs, setMonitoringConfigs] = useState<any[]>([]);
@@ -427,6 +442,61 @@ export default function App() {
     }
   };
 
+  const fetchInboxLeads = useCallback(async () => {
+    setInboxLoading(true);
+    setInboxError(null);
+    try {
+      const queryParams = new URLSearchParams();
+      if (inboxUrgency) queryParams.append("urgency", inboxUrgency);
+      if (inboxCategory) queryParams.append("category", inboxCategory);
+      if (inboxMinIntent.trim()) queryParams.append("buyingIntent", inboxMinIntent.trim());
+      if (inboxService.trim()) queryParams.append("service", inboxService.trim());
+
+      const res = await fetch(`${API_BASE_URL}/leads/inbox?${queryParams.toString()}`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch inbox leads: ${res.statusText}`);
+      }
+      const data = await res.json();
+      setQualifiedLeads(data);
+    } catch (err) {
+      setInboxError(err instanceof Error ? err.message : "Error fetching inbox leads");
+    } finally {
+      setInboxLoading(false);
+    }
+  }, [inboxUrgency, inboxCategory, inboxMinIntent, inboxService]);
+
+  const fetchInboxLeadDetails = useCallback(async (username: string) => {
+    setSelectedInboxLeadUsername(username);
+    setSelectedInboxLeadLoading(true);
+    setSelectedInboxLeadError(null);
+    setSelectedInboxLeadDetails(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/leads/inbox/${username}`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch details for lead @${username}`);
+      }
+      const data = await res.json();
+      setSelectedInboxLeadDetails(data);
+    } catch (err) {
+      setSelectedInboxLeadError(err instanceof Error ? err.message : `Error fetching details for lead @${username}`);
+    } finally {
+      setSelectedInboxLeadLoading(false);
+    }
+  }, []);
+
+  const handleExportInbox = (format: "csv" | "json") => {
+    window.open(`${API_BASE_URL}/leads/export?format=${format}`, "_blank");
+  };
+
+  useEffect(() => {
+    if (activeTab === "inbox") {
+      const timer = setTimeout(() => {
+        fetchInboxLeads();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab, fetchInboxLeads]);
+
   // Monitoring load and reload
   useEffect(() => {
     if (activeTab === "monitoring") {
@@ -619,6 +689,68 @@ export default function App() {
   const totalCategoriesCount = aiStats.categories.reduce((acc, cat) => acc + cat.count, 0);
   const totalIntentsCount = aiStats.intents.reduce((acc, intent) => acc + intent.count, 0);
 
+  const highPriorityLeads = qualifiedLeads.filter(lead => lead.recommendedAction === "Contact immediately");
+  const mediumPriorityLeads = qualifiedLeads.filter(lead => lead.recommendedAction === "Monitor");
+  const lowPriorityLeads = qualifiedLeads.filter(lead => lead.recommendedAction !== "Contact immediately" && lead.recommendedAction !== "Monitor");
+
+  const renderLeadCard = (lead: any) => {
+    const getUrgencyColor = (urgency: string) => {
+      if (urgency === "high") return "#ff4566";
+      if (urgency === "medium") return "#ffb600";
+      return "#00baff";
+    };
+
+    return (
+      <div
+        key={lead._id}
+        className="glass-card"
+        style={{
+          padding: "1rem",
+          background: "rgba(255, 255, 255, 0.02)",
+          border: "var(--glass-border)",
+          transition: "transform 0.2s ease, box-shadow 0.2s ease",
+          cursor: "default"
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+          <span style={{ fontWeight: "bold", color: "#fff", fontSize: "1rem" }}>@{lead.username}</span>
+          <span style={{
+            fontSize: "0.75rem",
+            fontWeight: "bold",
+            color: getUrgencyColor(lead.urgency),
+            background: `${getUrgencyColor(lead.urgency)}15`,
+            padding: "0.15rem 0.4rem",
+            borderRadius: "4px",
+            textTransform: "uppercase"
+          }}>
+            {lead.urgency}
+          </span>
+        </div>
+
+        <p style={{ margin: "0.25rem 0", color: "#eee", fontSize: "0.9rem" }}>
+          <strong>Problem:</strong> {lead.problem}
+        </p>
+        <p style={{ margin: "0.25rem 0", color: "#eee", fontSize: "0.9rem" }}>
+          <strong>Service:</strong> {lead.serviceNeeded}
+        </p>
+        
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.75rem", fontSize: "0.8rem" }}>
+          <div style={{ display: "flex", gap: "0.75rem", color: "var(--color-text-dim)" }}>
+            <span>🎯 Intent: <strong>{lead.buyingIntent}%</strong></span>
+            <span>🔥 Score: <strong>{lead.leadScore}</strong></span>
+          </div>
+          <button
+            onClick={() => fetchInboxLeadDetails(lead.username)}
+            className="btn btn-secondary"
+            style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
+          >
+            Open Details
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="dashboard-container">
       {/* Header */}
@@ -672,6 +804,12 @@ export default function App() {
           onClick={() => setActiveTab("market")}
         >
           📊 Market Intelligence
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "inbox" ? "active" : ""}`}
+          onClick={() => setActiveTab("inbox")}
+        >
+          📥 CRM Lead Inbox
         </button>
       </div>
 
@@ -2412,6 +2550,409 @@ export default function App() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === "inbox" && (
+        <div className="inbox-container animate-fade-in" style={{ padding: "0 1rem" }}>
+          
+          {/* Header/Controls bar */}
+          <div className="glass-card" style={{ padding: "1.5rem", marginBottom: "2rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
+              <div>
+                <h2 style={{ fontSize: "1.5rem", fontWeight: "bold", margin: 0, color: "#fff" }}>📥 Qualified CRM Lead Inbox</h2>
+                <p style={{ margin: "0.25rem 0 0 0", color: "var(--color-text-dim)", fontSize: "0.9rem" }}>
+                  Analyze qualified buying intentions and orchestrate outreach campaigns.
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: "0.75rem" }}>
+                <button
+                  onClick={() => handleExportInbox("csv")}
+                  className="btn btn-secondary"
+                  style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+                >
+                  📥 Export CSV
+                </button>
+                <button
+                  onClick={() => handleExportInbox("json")}
+                  className="btn btn-secondary"
+                  style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+                >
+                  🌐 Export JSON
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Inputs Grid */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: "1rem",
+              marginTop: "1.5rem",
+              paddingTop: "1.5rem",
+              borderTop: "1px solid rgba(255, 255, 255, 0.08)"
+            }}>
+              <div className="input-group" style={{ margin: 0 }}>
+                <label>Urgency Level</label>
+                <select
+                  value={inboxUrgency}
+                  onChange={(e) => setInboxUrgency(e.target.value)}
+                  style={{
+                    background: "rgba(255, 255, 255, 0.03)",
+                    border: "var(--glass-border)",
+                    borderRadius: "6px",
+                    color: "#fff",
+                    padding: "0.6rem",
+                    width: "100%",
+                    outline: "none"
+                  }}
+                >
+                  <option value="" style={{ background: "#1b0b30" }}>All Urgencies</option>
+                  <option value="high" style={{ background: "#1b0b30" }}>🔴 High Urgency</option>
+                  <option value="medium" style={{ background: "#1b0b30" }}>🟡 Medium Urgency</option>
+                  <option value="low" style={{ background: "#1b0b30" }}>🔵 Low Urgency</option>
+                </select>
+              </div>
+
+              <div className="input-group" style={{ margin: 0 }}>
+                <label>Service Needed</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Dermatologist, Recruiter"
+                  value={inboxService}
+                  onChange={(e) => setInboxService(e.target.value)}
+                  style={{
+                    background: "rgba(255, 255, 255, 0.03)",
+                    border: "var(--glass-border)",
+                    borderRadius: "6px",
+                    color: "#fff",
+                    padding: "0.6rem",
+                    width: "100%",
+                    outline: "none"
+                  }}
+                />
+              </div>
+
+              <div className="input-group" style={{ margin: 0 }}>
+                <label>Category Filter</label>
+                <select
+                  value={inboxCategory}
+                  onChange={(e) => setInboxCategory(e.target.value)}
+                  style={{
+                    background: "rgba(255, 255, 255, 0.03)",
+                    border: "var(--glass-border)",
+                    borderRadius: "6px",
+                    color: "#fff",
+                    padding: "0.6rem",
+                    width: "100%",
+                    outline: "none"
+                  }}
+                >
+                  <option value="" style={{ background: "#1b0b30" }}>All Categories</option>
+                  <option value="healthcare" style={{ background: "#1b0b30" }}>Healthcare</option>
+                  <option value="fitness" style={{ background: "#1b0b30" }}>Fitness</option>
+                  <option value="real_estate" style={{ background: "#1b0b30" }}>Real Estate</option>
+                  <option value="recruitment" style={{ background: "#1b0b30" }}>Recruitment</option>
+                  <option value="education" style={{ background: "#1b0b30" }}>Education</option>
+                  <option value="finance" style={{ background: "#1b0b30" }}>Finance</option>
+                  <option value="beauty" style={{ background: "#1b0b30" }}>Beauty</option>
+                  <option value="technology" style={{ background: "#1b0b30" }}>Technology</option>
+                  <option value="general" style={{ background: "#1b0b30" }}>General</option>
+                </select>
+              </div>
+
+              <div className="input-group" style={{ margin: 0 }}>
+                <label>Min Buying Intent Score ({inboxMinIntent || "0"})</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={inboxMinIntent}
+                  onChange={(e) => setInboxMinIntent(e.target.value)}
+                  style={{
+                    width: "100%",
+                    accentColor: "var(--color-primary)",
+                    marginTop: "0.5rem"
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Inbox Loading / Errors */}
+          {inboxLoading && (
+            <div style={{ textAlign: "center", padding: "3rem" }}>
+              <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
+              <p style={{ color: "var(--color-text-dim)" }}>Analyzing leads inbox...</p>
+            </div>
+          )}
+
+          {inboxError && <div className="toast toast-error">{inboxError}</div>}
+
+          {/* CRM Kanban Columns */}
+          {!inboxLoading && !inboxError && (
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+              gap: "1.5rem",
+              alignItems: "start"
+            }}>
+              
+              {/* High Column */}
+              <div className="glass-card" style={{ background: "rgba(255, 69, 102, 0.03)", padding: "1.25rem", borderTop: "4px solid #ff4566" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                  <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#ff4566", margin: 0 }}>🔥 Contact Immediately</h3>
+                  <span style={{ background: "rgba(255, 69, 102, 0.15)", color: "#ff4566", padding: "0.2rem 0.5rem", borderRadius: "10px", fontSize: "0.8rem", fontWeight: "bold" }}>
+                    {highPriorityLeads.length}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", minHeight: "150px" }}>
+                  {highPriorityLeads.length === 0 ? (
+                    <div style={{ textAlign: "center", color: "var(--color-text-dim)", padding: "2rem 0", fontSize: "0.9rem" }}>No high priority leads.</div>
+                  ) : (
+                    highPriorityLeads.map(lead => renderLeadCard(lead))
+                  )}
+                </div>
+              </div>
+
+              {/* Medium Column */}
+              <div className="glass-card" style={{ background: "rgba(255, 182, 0, 0.03)", padding: "1.25rem", borderTop: "4px solid #ffb600" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                  <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#ffb600", margin: 0 }}>⚡ Monitor Regularly</h3>
+                  <span style={{ background: "rgba(255, 182, 0, 0.15)", color: "#ffb600", padding: "0.2rem 0.5rem", borderRadius: "10px", fontSize: "0.8rem", fontWeight: "bold" }}>
+                    {mediumPriorityLeads.length}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", minHeight: "150px" }}>
+                  {mediumPriorityLeads.length === 0 ? (
+                    <div style={{ textAlign: "center", color: "var(--color-text-dim)", padding: "2rem 0", fontSize: "0.9rem" }}>No medium priority leads.</div>
+                  ) : (
+                    mediumPriorityLeads.map(lead => renderLeadCard(lead))
+                  )}
+                </div>
+              </div>
+
+              {/* Low Column */}
+              <div className="glass-card" style={{ background: "rgba(0, 186, 255, 0.03)", padding: "1.25rem", borderTop: "4px solid #00baff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                  <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#00baff", margin: 0 }}>🕒 Low Priority / Watchlist</h3>
+                  <span style={{ background: "rgba(0, 186, 255, 0.15)", color: "#00baff", padding: "0.2rem 0.5rem", borderRadius: "10px", fontSize: "0.8rem", fontWeight: "bold" }}>
+                    {lowPriorityLeads.length}
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", minHeight: "150px" }}>
+                  {lowPriorityLeads.length === 0 ? (
+                    <div style={{ textAlign: "center", color: "var(--color-text-dim)", padding: "2rem 0", fontSize: "0.9rem" }}>No low priority leads.</div>
+                  ) : (
+                    lowPriorityLeads.map(lead => renderLeadCard(lead))
+                  )}
+                </div>
+              </div>
+
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* Qualified Lead Deep-dive Modal */}
+      {selectedInboxLeadUsername && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0, 0, 0, 0.6)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "2rem",
+          }}
+          onClick={() => setSelectedInboxLeadUsername(null)}
+        >
+          <div
+            className="glass-card"
+            style={{
+              width: "100%",
+              maxWidth: "700px",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              padding: "2rem",
+              position: "relative",
+              animation: "fade-in 0.3s ease-out",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setSelectedInboxLeadUsername(null)}
+              style={{
+                position: "absolute",
+                top: "1.5rem",
+                right: "1.5rem",
+                background: "rgba(255, 255, 255, 0.08)",
+                border: "var(--glass-border)",
+                borderRadius: "50%",
+                width: "36px",
+                height: "36px",
+                color: "#fff",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: "bold",
+              }}
+            >
+              ✕
+            </button>
+
+            <h2 className="card-title" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              📋 Lead Qualification: @{selectedInboxLeadUsername}
+            </h2>
+
+            {selectedInboxLeadLoading && (
+              <div style={{ textAlign: "center", padding: "2rem" }}>
+                <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
+                <p style={{ color: "var(--color-text-dim)" }}>Loading qualification profile...</p>
+              </div>
+            )}
+
+            {selectedInboxLeadError && <div className="toast toast-error">{selectedInboxLeadError}</div>}
+
+            {selectedInboxLeadDetails && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", marginTop: "1rem" }}>
+                
+                {/* Metrics Row */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                  gap: "1rem",
+                  padding: "1rem",
+                  background: "rgba(255, 255, 255, 0.02)",
+                  border: "var(--glass-border)",
+                  borderRadius: "8px"
+                }}>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Lead Score</div>
+                    <div style={{ fontSize: "1.8rem", fontWeight: "bold", color: "var(--color-primary)" }}>
+                      {selectedInboxLeadDetails.qualification.leadScore}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Buying Intent</div>
+                    <div style={{ fontSize: "1.8rem", fontWeight: "bold", color: "var(--color-accent)" }}>
+                      {selectedInboxLeadDetails.qualification.buyingIntent}%
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Urgency</div>
+                    <div style={{ fontSize: "1.5rem", fontWeight: "bold", color: selectedInboxLeadDetails.qualification.urgency === "high" ? "#ff4566" : selectedInboxLeadDetails.qualification.urgency === "medium" ? "#ffb600" : "#00baff" }}>
+                      {selectedInboxLeadDetails.qualification.urgency.toUpperCase()}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "center" }}>
+                    <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Confidence</div>
+                    <div style={{ fontSize: "1.8rem", fontWeight: "bold", color: "#fff" }}>
+                      {selectedInboxLeadDetails.qualification.confidence}%
+                    </div>
+                  </div>
+                </div>
+
+                {/* Qualification Details */}
+                <div className="glass-card" style={{ padding: "1rem" }}>
+                  <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
+                    🔍 AI Qualification Profile
+                  </h3>
+                  <p style={{ margin: "0.4rem 0" }}><strong>Core Problem:</strong> {selectedInboxLeadDetails.qualification.problem}</p>
+                  <p style={{ margin: "0.4rem 0" }}><strong>Service Required:</strong> {selectedInboxLeadDetails.qualification.serviceNeeded}</p>
+                  <p style={{ margin: "0.4rem 0" }}><strong>Recommended Action:</strong> <span style={{ color: "var(--color-accent)", fontWeight: "bold" }}>{selectedInboxLeadDetails.qualification.recommendedAction}</span></p>
+                  <p style={{ margin: "0.4rem 0", lineHeight: "1.4" }}><strong>Qualification Reason:</strong> {selectedInboxLeadDetails.qualification.qualificationReason}</p>
+                </div>
+
+                {/* User Intelligence Aggregation Snapshot */}
+                {selectedInboxLeadDetails.userIntelligence && (
+                  <div className="glass-card" style={{ padding: "1rem" }}>
+                    <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
+                      👤 User Intelligence Snapshot
+                    </h3>
+                    <p style={{ margin: "0.4rem 0" }}><strong>Dominant Category:</strong> {selectedInboxLeadDetails.userIntelligence.overallCategory}</p>
+                    <p style={{ margin: "0.4rem 0" }}><strong>Dominant Intent:</strong> {intentDisplayNames[selectedInboxLeadDetails.userIntelligence.overallIntent] || selectedInboxLeadDetails.userIntelligence.overallIntent}</p>
+                    <p style={{ margin: "0.4rem 0", lineHeight: "1.4" }}><strong>AI Summary:</strong> {selectedInboxLeadDetails.userIntelligence.summary}</p>
+                    <p style={{ margin: "0.4rem 0" }}><strong>Analyzed Posts:</strong> {selectedInboxLeadDetails.userIntelligence.postCountAnalyzed} posts ({selectedInboxLeadDetails.userIntelligence.leadPostCount} leads)</p>
+                  </div>
+                )}
+
+                {/* Historical Lead Score Timeline Charting */}
+                {selectedInboxLeadDetails.leadHistory && selectedInboxLeadDetails.leadHistory.length > 0 && (
+                  <div className="glass-card" style={{ padding: "1rem" }}>
+                    <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 1rem 0" }}>📈 Lead Score Timeline</h3>
+                    <div style={{ 
+                      display: "flex", 
+                      alignItems: "flex-end", 
+                      justifyContent: "space-between", 
+                      height: "120px", 
+                      padding: "0.5rem 1rem", 
+                      background: "rgba(0, 0, 0, 0.2)", 
+                      borderRadius: "8px",
+                      gap: "0.5rem"
+                    }}>
+                      {selectedInboxLeadDetails.leadHistory.map((hist: any, idx: number) => (
+                        <div key={idx} style={{ 
+                          display: "flex", 
+                          flexDirection: "column", 
+                          alignItems: "center",
+                          flex: 1
+                        }}>
+                          <span style={{ fontSize: "0.75rem", fontWeight: "bold", color: "#fff", marginBottom: "0.25rem" }}>
+                            {hist.leadScore}
+                          </span>
+                          <div style={{ 
+                            width: "12px", 
+                            height: `${hist.leadScore}%`, 
+                            maxHeight: "80px",
+                            background: hist.leadScore >= 80 ? "linear-gradient(180deg, var(--color-primary) 0%, #7c22e4 100%)" : "linear-gradient(180deg, var(--color-accent) 0%, #00a2cc 100%)", 
+                            borderRadius: "4px 4px 0 0",
+                            boxShadow: "0 0 10px rgba(159, 62, 255, 0.2)"
+                          }}></div>
+                          <span style={{ fontSize: "0.6rem", color: "var(--color-text-dim)", marginTop: "0.25rem", textAlign: "center", whiteSpace: "nowrap" }}>
+                            {new Date(hist.recordedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Supporting Posts */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                  <h3 style={{ fontSize: "1.1rem", color: "#fff", margin: 0 }}>📚 Supporting Posts</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxHeight: "250px", overflowY: "auto" }}>
+                    {selectedInboxLeadDetails.supportingPosts.length === 0 ? (
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.9rem" }}>No supporting posts found.</p>
+                    ) : (
+                      selectedInboxLeadDetails.supportingPosts.map((post: any) => (
+                        <div key={post._id} className="glass-card" style={{ padding: "0.75rem 1rem", background: "rgba(255,255,255,0.01)", border: "var(--glass-border)" }}>
+                          <p style={{ fontSize: "0.85rem", color: "#eee", margin: "0 0 0.5rem 0", lineHeight: "1.4" }}>
+                            {post.caption}
+                          </p>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "0.75rem", color: "var(--color-text-dim)" }}>
+                            <span>Posted: {post.postedAt ? new Date(post.postedAt).toLocaleDateString() : "Unknown"}</span>
+                            <a href={post.postUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--color-accent)", textDecoration: "none" }}>
+                              View Post ↗
+                            </a>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            )}
+          </div>
         </div>
       )}
 

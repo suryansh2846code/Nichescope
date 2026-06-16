@@ -19,7 +19,7 @@ try {
   process.exit(1);
 }
 
-const provider = getAIProvider();
+
 
 const VALID_CATEGORIES = new Set([
   "healthcare",
@@ -48,6 +48,7 @@ export async function processAnalysisJob(job: {
   data: AnalysisJobData;
   updateProgress: (progress: number) => Promise<any>;
 }) {
+  const provider = getAIProvider();
   const { postId, username, caption } = job.data;
   console.log(`Starting AI analysis for post ${postId} by @${username}`);
   await job.updateProgress(10);

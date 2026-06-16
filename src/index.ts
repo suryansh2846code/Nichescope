@@ -9,8 +9,6 @@ import usersRouter from "./routes/users";
 import searchRouter from "./routes/search";
 import { startMonitoringScheduler } from "./services/trends/scheduler";
 import monitoringRouter from "./routes/monitoring";
-import { startMarketScheduler } from "./services/market/marketScheduler";
-import marketRouter from "./routes/market";
 import crmRouter from "./routes/crm";
 
 const app = express();
@@ -41,7 +39,6 @@ app.use("/analysis", analysisRouter);
 app.use("/users", usersRouter);
 app.use("/search", searchRouter);
 app.use("/monitoring", monitoringRouter);
-app.use("/market", marketRouter);
 app.use("/crm", crmRouter);
 
 app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -64,7 +61,6 @@ try {
   app.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}`);
     startMonitoringScheduler();
-    startMarketScheduler();
   });
 } catch (error) {
   const message = error instanceof Error ? error.message : "Unknown startup error";

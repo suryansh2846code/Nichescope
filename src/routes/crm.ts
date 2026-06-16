@@ -142,32 +142,45 @@ router.patch("/leads/:username/status", async (req, res, next) => {
     }
 
     const normalizedUser = username.toLowerCase().trim();
-    const pipeline = await LeadPipeline.findOne({ username: normalizedUser });
+    let pipeline = await LeadPipeline.findOne({ username: normalizedUser });
     if (!pipeline) {
-      res.status(404).json({ error: "Lead pipeline not found" });
-      return;
+      pipeline = await LeadPipeline.create({
+        username: normalizedUser,
+        status: status,
+        priority: "medium",
+        assignedTo: "",
+        notes: [],
+        tags: [],
+        lastActivityAt: new Date(),
+      });
+
+      await LeadActivity.create({
+        username: normalizedUser,
+        type: "created",
+        newValue: status,
+        createdAt: new Date(),
+      });
+    } else {
+      const oldStatus = pipeline.status;
+      pipeline.status = status;
+      pipeline.lastActivityAt = new Date();
+      await pipeline.save();
+
+      let activityType: "converted" | "lost" | "status_changed" = "status_changed";
+      if (status === "converted") {
+        activityType = "converted";
+      } else if (status === "lost") {
+        activityType = "lost";
+      }
+
+      await LeadActivity.create({
+        username: normalizedUser,
+        type: activityType,
+        oldValue: oldStatus,
+        newValue: status,
+        createdAt: new Date(),
+      });
     }
-
-    const oldStatus = pipeline.status;
-    pipeline.status = status;
-    pipeline.lastActivityAt = new Date();
-    await pipeline.save();
-
-    // Map status types to corresponding lead activity types
-    let activityType: "converted" | "lost" | "status_changed" = "status_changed";
-    if (status === "converted") {
-      activityType = "converted";
-    } else if (status === "lost") {
-      activityType = "lost";
-    }
-
-    await LeadActivity.create({
-      username: normalizedUser,
-      type: activityType,
-      oldValue: oldStatus,
-      newValue: status,
-      createdAt: new Date(),
-    });
 
     res.json(pipeline);
   } catch (error) {

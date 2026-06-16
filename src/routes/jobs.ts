@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { scrapeQueue } from "../queues/scrapeQueue";
+import { discoveryQueue } from "../queues/discoveryQueue";
 
 const router = Router();
 
@@ -12,7 +13,10 @@ router.get("/:id", async (req, res, next) => {
       return;
     }
 
-    const job = await scrapeQueue.getJob(id);
+    let job: any = await scrapeQueue.getJob(id);
+    if (!job) {
+      job = await discoveryQueue.getJob(id);
+    }
 
     if (!job) {
       res.status(404).json({ error: "Job not found" });

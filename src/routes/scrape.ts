@@ -17,15 +17,21 @@ router.post("/", async (req, res, next) => {
     }
 
     const targetNiche = typeof niche === "string" && niche.trim() !== "" ? niche.trim() : "general";
+    const cleanUsername = username.replace(/^@/, "").trim().toLowerCase();
+    const jobId = `scrape-${cleanUsername}-${Date.now()}`;
 
-    const job = await scrapeQueue.add(SCRAPE_PROFILE_JOB_NAME, {
-      username: username.replace(/^@/, "").trim(),
-      niche: targetNiche,
-      maxFollowers:
-        typeof maxFollowers === "number" && maxFollowers > 0
-          ? maxFollowers
-          : undefined,
-    });
+    const job = await scrapeQueue.add(
+      SCRAPE_PROFILE_JOB_NAME,
+      {
+        username: username.replace(/^@/, "").trim(),
+        niche: targetNiche,
+        maxFollowers:
+          typeof maxFollowers === "number" && maxFollowers > 0
+            ? maxFollowers
+            : undefined,
+      },
+      { jobId }
+    );
 
     res.status(202).json({
       jobId: job.id,

@@ -1,12 +1,12 @@
-import type { EmbeddingProvider } from "./EmbeddingProvider";
+import type { EmbeddingProvider } from "./EmbeddingProvider.js";
 
 export class MockEmbeddingProvider implements EmbeddingProvider {
   async generateEmbedding(text: string): Promise<number[]> {
     const textLower = text.toLowerCase();
-    
+
     // Choose index range to boost based on category keywords
     let boostRange: [number, number] | null = null;
-    
+
     if (
       textLower.includes("acne") ||
       textLower.includes("dermatologist") ||
@@ -85,19 +85,19 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
     for (let i = 0; i < dimensions; i++) {
       // Base random value between -0.1 and 0.1
       let val = (rng() * 2 - 1) * 0.1;
-      
+
       // Apply strong boost if within the matched range
       if (boostRange && i >= boostRange[0] && i < boostRange[1]) {
         val += 0.8 + rng() * 0.2; // Significant boost
       }
-      
+
       vector.push(val);
     }
 
     // L2 Normalize vector
     const sumSq = vector.reduce((sum, val) => sum + val * val, 0);
     const norm = Math.sqrt(sumSq) || 1;
-    
+
     return vector.map(val => val / norm);
   }
 
@@ -112,7 +112,7 @@ export class MockEmbeddingProvider implements EmbeddingProvider {
   }
 
   private mulberry32(a: number) {
-    return function() {
+    return function () {
       let t = a += 0x6D2B79F5;
       t = Math.imul(t ^ (t >>> 15), t | 1);
       t ^= t + Math.imul(t ^ (t >>> 7), t | 61);

@@ -1,7 +1,7 @@
 import { Worker } from "bullmq";
 import { connectToDatabase } from "../db";
 import { createRedisConnectionOptions } from "../queues/redis";
-import { SCRAPE_QUEUE_NAME, type ScrapeJobData } from "../queues/scrapeQueue";
+import { SCRAPE_QUEUE_NAME, type ScrapeJobData, scrapeQueue } from "../queues/scrapeQueue";
 import { scrapeProfile } from "../scraper/instagram";
 import { saveOrUpdateScrapedProfile } from "./saveLead";
 import { saveOrUpdatePosts } from "./savePost";
@@ -121,11 +121,23 @@ const worker = new Worker<ScrapeJobData>(
 );
 
 worker.on("completed", (job) => {
-  console.log(`Scrape job ${job.id} completed`);
+  const username = job.data?.username || "unknown";
+  console.log(`[COMPLETED] Job ID: ${job.id}, Username: @${username}`);
 });
 
 worker.on("failed", (job, error) => {
-  console.error(`Scrape job ${job?.id ?? "unknown"} failed: ${error.message}`);
+  const username = job?.data?.username || "unknown";
+  console.error(`[FAILED] Job ID: ${job?.id ?? "unknown"}, Username: @${username}, Error: ${error.message}`);
+});
+
+worker.on("stalled", async (jobId) => {
+  try {
+    const job = await scrapeQueue.getJob(jobId);
+    const username = job?.data?.username || "unknown";
+    console.log(`[STALLED] Job ID: ${jobId}, Username: @${username}`);
+  } catch (err) {
+    console.log(`[STALLED] Job ID: ${jobId}`);
+  }
 });
 
 console.log(`Scrape worker listening on "${SCRAPE_QUEUE_NAME}" queue`);

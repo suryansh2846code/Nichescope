@@ -176,7 +176,7 @@ export default function App() {
   const [devSuccessMessage, setDevSuccessMessage] = useState<string | null>(null);
 
   // Logs Tab State
-  const [selectedWorker, setSelectedWorker] = useState<"scraper" | "discovery">("scraper");
+  const [selectedWorker, setSelectedWorker] = useState<"scraper" | "discovery" | "analysis">("scraper");
   const [workerLogs, setWorkerLogs] = useState<any[]>([]);
   const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
   const [logsSearchTerm, setLogsSearchTerm] = useState("");
@@ -1850,6 +1850,22 @@ export default function App() {
                   }}
                 >
                   🔎 Discovery Worker
+                </button>
+                <button
+                  onClick={() => setSelectedWorker("analysis")}
+                  style={{
+                    padding: "0.4rem 1rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: selectedWorker === "analysis" ? "rgba(0, 186, 255, 0.15)" : "transparent",
+                    color: selectedWorker === "analysis" ? "var(--color-accent)" : "var(--color-text-dim)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    fontWeight: "bold",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  🧠 Analyze Worker
                 </button>
               </div>
 

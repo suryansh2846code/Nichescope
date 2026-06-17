@@ -520,7 +520,15 @@ export async function scrapeHashtag(
     console.log(`Discovered ${targetUrls.length} posts for hashtag #${cleanHashtag}. Extracting authors...`);
 
     const discoveries: DiscoveredUser[] = [];
+    const startTime = Date.now();
+    const HASHTAG_TIMEOUT_MS = 60000; // 60s total limit for post extraction
+
     for (const url of targetUrls) {
+      if (Date.now() - startTime > HASHTAG_TIMEOUT_MS) {
+        console.warn(`Hashtag discovery timeout reached (${HASHTAG_TIMEOUT_MS / 1000}s). Stopping post extraction early.`);
+        break;
+      }
+
       let attempts = 0;
       let success = false;
       while (attempts < 2 && !success) {

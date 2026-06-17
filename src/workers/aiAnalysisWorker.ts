@@ -8,6 +8,10 @@ import { PostAnalysis } from "../models/PostAnalysis";
 import { Post } from "../models/Post";
 import { userIntelligenceQueue, AGGREGATE_USER_JOB_NAME } from "../queues/userIntelligenceQueue";
 import { embeddingQueue, GENERATE_EMBEDDING_JOB_NAME } from "../queues/embeddingQueue";
+import { setupWorkerLogger } from "../utils/logger";
+
+// Setup logging interceptor
+setupWorkerLogger("analysis");
 
 // Connect to MongoDB
 try {

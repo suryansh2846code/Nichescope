@@ -13,7 +13,7 @@ export const SCRAPE_PROFILE_JOB_NAME = "scrape-profile";
 export const scrapeQueue = new Queue<ScrapeJobData, unknown, typeof SCRAPE_PROFILE_JOB_NAME>(SCRAPE_QUEUE_NAME, {
   connection: createRedisConnectionOptions(),
   defaultJobOptions: {
-    attempts: 3,
+    attempts: 2,
     backoff: {
       type: "exponential",
       delay: 5_000,

@@ -99,7 +99,7 @@ interface LeadPipelineResult {
 
 export default function App() {
   // Navigation
-  const [activeTab, setActiveTab] = useState<"discovery" | "hashtag-discovery" | "qualified" | "crm" | "settings" | "developer">("discovery");
+  const [activeTab, setActiveTab] = useState<"discovery" | "hashtag-discovery" | "qualified" | "crm" | "settings" | "developer" | "logs">("discovery");
 
   // Lead Inbox Tab State
   const [qualifiedLeads, setQualifiedLeads] = useState<any[]>([]);
@@ -175,6 +175,36 @@ export default function App() {
   const [devError, setDevError] = useState<string | null>(null);
   const [devSuccessMessage, setDevSuccessMessage] = useState<string | null>(null);
 
+  // Logs Tab State
+  const [selectedWorker, setSelectedWorker] = useState<"scraper" | "discovery">("scraper");
+  const [workerLogs, setWorkerLogs] = useState<any[]>([]);
+  const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
+  const [logsSearchTerm, setLogsSearchTerm] = useState("");
+
+  const fetchWorkerLogs = useCallback(async (workerName: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/logs/${workerName}?limit=150`);
+      if (res.ok) {
+        const data = await res.json();
+        setWorkerLogs(data);
+      }
+    } catch (err) {
+      console.error("Error fetching logs:", err);
+    }
+  }, []);
+
+  const handleClearLogs = async (workerName: string) => {
+    if (!confirm(`Are you sure you want to clear all log history for "${workerName}"?`)) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/logs/clear/${workerName}`, { method: "POST" });
+      if (res.ok) {
+        setWorkerLogs([]);
+      }
+    } catch (err) {
+      console.error("Error clearing logs:", err);
+    }
+  };
+
   // Add to CRM Handler
   const handleAddToCrm = async (username: string) => {
     try {
@@ -221,13 +251,13 @@ export default function App() {
       const res = await fetch(`${API_BASE_URL}/discover/hashtag/${encodeURIComponent(hashtag)}`);
       if (!res.ok) throw new Error("Failed to fetch discovered users");
       const discoveredList = await res.json() as { username: string }[];
-      
+
       const qualRes = await fetch(`${API_BASE_URL}/leads/inbox`);
       let inboxList: any[] = [];
       if (qualRes.ok) {
         inboxList = await qualRes.json();
       }
-      
+
       const mapped = discoveredList.map(disc => {
         const username = disc.username.toLowerCase();
         const q = inboxList.find(i => i.username.toLowerCase() === username);
@@ -311,32 +341,62 @@ export default function App() {
     }
   }, []);
 
-  const handleTriggerScenario = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleTriggerScenarioDirect = async (scenario: string, username: string) => {
     setDevError(null);
     setDevSuccessMessage(null);
-    const username = devUsername.trim();
-    if (!username) {
-      setDevError("Username is required");
-      return;
-    }
     setDevSubmitting(true);
     try {
       const res = await fetch(`${API_BASE_URL}/dev/trigger-scenario`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: devScenario, username })
+        body: JSON.stringify({ scenario, username })
       });
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "Failed to trigger scenario");
       }
       const data = await res.json();
-      setDevSuccessMessage(`Scenario ${devScenario} triggered! Job ID: ${data.jobId}`);
+      setDevSuccessMessage(`Scenario "${scenario}" triggered for @${username}! Job ID: ${data.jobId}`);
       setActiveJobId(data.jobId);
-      setDevUsername("");
+      fetchAllJobs();
     } catch (err) {
       setDevError(err instanceof Error ? err.message : "Error triggering scenario");
+    } finally {
+      setDevSubmitting(false);
+    }
+  };
+
+  const handleTriggerConcurrencyTest = async () => {
+    setDevError(null);
+    setDevSuccessMessage(null);
+    setDevSubmitting(true);
+    try {
+      const scenarios = [
+        { scenario: "success", username: "concurrent_user_1" },
+        { scenario: "success", username: "concurrent_user_2" },
+        { scenario: "success", username: "concurrent_user_3" },
+        { scenario: "success", username: "concurrent_user_4" },
+        { scenario: "success", username: "concurrent_user_5" }
+      ];
+
+      const promises = scenarios.map(async ({ scenario, username }) => {
+        const res = await fetch(`${API_BASE_URL}/dev/trigger-scenario`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenario, username })
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || `Failed for @${username}`);
+        }
+        return res.json();
+      });
+
+      await Promise.all(promises);
+      setDevSuccessMessage("Successfully triggered 5 parallel mock jobs concurrent run!");
+      fetchAllJobs();
+    } catch (err) {
+      setDevError(err instanceof Error ? err.message : "Error triggering concurrency test");
     } finally {
       setDevSubmitting(false);
     }
@@ -501,7 +561,7 @@ export default function App() {
         body: JSON.stringify({ status })
       });
       if (!res.ok) throw new Error("Failed to update status");
-      
+
       fetchCrmData();
       if (selectedCrmUsername && selectedCrmUsername.toLowerCase() === username.toLowerCase()) {
         fetchCrmLeadDetails(username);
@@ -519,7 +579,7 @@ export default function App() {
         body: JSON.stringify({ assignedTo })
       });
       if (!res.ok) throw new Error("Failed to assign lead");
-      
+
       fetchCrmData();
       if (selectedCrmUsername && selectedCrmUsername.toLowerCase() === username.toLowerCase()) {
         fetchCrmLeadDetails(username);
@@ -539,7 +599,7 @@ export default function App() {
         body: JSON.stringify({ content: noteContent.trim() })
       });
       if (!res.ok) throw new Error("Failed to add note");
-      
+
       setNoteContent("");
       fetchCrmData();
       if (selectedCrmUsername && selectedCrmUsername.toLowerCase() === username.toLowerCase()) {
@@ -560,7 +620,7 @@ export default function App() {
         body: JSON.stringify({ tag: tagInput.trim() })
       });
       if (!res.ok) throw new Error("Failed to add tag");
-      
+
       setTagInput("");
       fetchCrmData();
       if (selectedCrmUsername && selectedCrmUsername.toLowerCase() === username.toLowerCase()) {
@@ -639,6 +699,20 @@ export default function App() {
     return () => clearInterval(intervalId);
   }, [activeJobId, activeDiscoveryKeyword]);
 
+  // Poll worker logs
+  useEffect(() => {
+    if (activeTab !== "logs") return;
+
+    fetchWorkerLogs(selectedWorker);
+
+    if (!logsAutoRefresh) return;
+    const intervalId = setInterval(() => {
+      fetchWorkerLogs(selectedWorker);
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, [activeTab, selectedWorker, logsAutoRefresh, fetchWorkerLogs]);
+
   const getScoreBadgeClass = (score: number) => {
     if (score >= 80) return "score-badge-circle score-badge-high";
     if (score >= 50) return "score-badge-circle score-badge-medium";
@@ -705,7 +779,7 @@ export default function App() {
         <p style={{ margin: "0.25rem 0", color: "#eee", fontSize: "0.9rem" }}>
           <strong>Service:</strong> {lead.serviceNeeded}
         </p>
-        
+
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.75rem", fontSize: "0.8rem" }}>
           <div style={{ display: "flex", gap: "0.75rem", color: "var(--color-text-dim)" }}>
             <span>🎯 Intent: <strong>{lead.buyingIntent}%</strong></span>
@@ -765,7 +839,7 @@ export default function App() {
         <p style={{ margin: "0.2rem 0", color: "#ddd", fontSize: "0.85rem" }}>
           <strong>Need:</strong> {lead.serviceNeeded}
         </p>
-        
+
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.75rem", fontSize: "0.75rem" }}>
           <div style={{ display: "flex", gap: "0.5rem", color: "var(--color-text-dim)" }}>
             <span>🎯 Intent: <strong>{lead.buyingIntent}%</strong></span>
@@ -830,6 +904,12 @@ export default function App() {
           onClick={() => setActiveTab("settings")}
         >
           ⚙️ Settings
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "logs" ? "active" : ""}`}
+          onClick={() => setActiveTab("logs")}
+        >
+          📋 System Logs
         </button>
         {isDevMode && (
           <button
@@ -1150,7 +1230,7 @@ export default function App() {
           {/* Job Pipeline Status Monitor */}
           <div className="glass-card card-table" style={{ marginTop: "2rem" }}>
             <h3 className="card-title" style={{ fontSize: "1.3rem", margin: 0, marginBottom: "1rem" }}>⚙️ Jobs Pipeline Monitor</h3>
-            
+
             {/* Summary counters grid */}
             <div style={{
               display: "grid",
@@ -1699,97 +1779,465 @@ export default function App() {
         </div>
       )}
 
+      {activeTab === "logs" && (
+        <div className="logs-container animate-fade-in" style={{ padding: "0 1rem" }}>
+          <div className="glass-card" style={{ padding: "1.5rem", marginBottom: "1.5rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
+              <div>
+                <h2 style={{ fontSize: "1.5rem", fontWeight: "bold", margin: 0, color: "#fff" }}>📋 Worker Console Logs</h2>
+                <p style={{ margin: "0.25rem 0 0 0", color: "var(--color-text-dim)", fontSize: "0.9rem" }}>
+                  Monitor standard output and execution steps for active scraper and discovery workers in real-time.
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.85rem", color: "var(--color-text-dim)", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={logsAutoRefresh}
+                    onChange={(e) => setLogsAutoRefresh(e.target.checked)}
+                    style={{ cursor: "pointer" }}
+                  />
+                  Auto-refresh (2s)
+                </label>
+                <button
+                  onClick={() => fetchWorkerLogs(selectedWorker)}
+                  className="btn btn-secondary"
+                  style={{ minWidth: "auto", margin: 0, padding: "0.4rem 0.8rem", fontSize: "0.85rem" }}
+                >
+                  🔄 Refresh Now
+                </button>
+                <button
+                  onClick={() => handleClearLogs(selectedWorker)}
+                  className="btn btn-secondary"
+                  style={{ minWidth: "auto", margin: 0, padding: "0.4rem 0.8rem", fontSize: "0.85rem", border: "1px solid rgba(239, 68, 68, 0.3)", color: "#ef4444", background: "rgba(239, 68, 68, 0.02)" }}
+                >
+                  🧹 Clear Log History
+                </button>
+              </div>
+            </div>
+
+            {/* Worker Selection Tabs & Search bar */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "1.5rem", flexWrap: "wrap", gap: "1rem" }}>
+              <div style={{ display: "flex", gap: "0.5rem", background: "rgba(255, 255, 255, 0.03)", padding: "0.25rem", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.05)" }}>
+                <button
+                  onClick={() => setSelectedWorker("scraper")}
+                  style={{
+                    padding: "0.4rem 1rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: selectedWorker === "scraper" ? "rgba(0, 186, 255, 0.15)" : "transparent",
+                    color: selectedWorker === "scraper" ? "var(--color-accent)" : "var(--color-text-dim)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    fontWeight: "bold",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  🕸️ Scraper Worker
+                </button>
+                <button
+                  onClick={() => setSelectedWorker("discovery")}
+                  style={{
+                    padding: "0.4rem 1rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: selectedWorker === "discovery" ? "rgba(0, 186, 255, 0.15)" : "transparent",
+                    color: selectedWorker === "discovery" ? "var(--color-accent)" : "var(--color-text-dim)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    fontWeight: "bold",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  🔎 Discovery Worker
+                </button>
+              </div>
+
+              <div>
+                <input
+                  type="text"
+                  placeholder="🔍 Filter log content..."
+                  value={logsSearchTerm}
+                  onChange={(e) => setLogsSearchTerm(e.target.value)}
+                  className="input-field"
+                  style={{ width: "250px", margin: 0, padding: "0.4rem 0.75rem", fontSize: "0.85rem" }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Terminal Console View */}
+          <div
+            style={{
+              background: "#0c0e12",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              borderRadius: "12px",
+              padding: "1.5rem",
+              fontFamily: 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, Courier, monospace',
+              fontSize: "0.85rem",
+              lineHeight: "1.5",
+              color: "#e2e8f0",
+              height: "60vh",
+              overflowY: "auto",
+              boxShadow: "inset 0 4px 20px rgba(0, 0, 0, 0.8)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.25rem"
+            }}
+          >
+            {(() => {
+              const filtered = workerLogs.filter(log =>
+                log.message.toLowerCase().includes(logsSearchTerm.toLowerCase())
+              );
+
+              if (filtered.length === 0) {
+                return (
+                  <div style={{ color: "var(--color-text-dim)", textAlign: "center", padding: "4rem 0" }}>
+                    {logsSearchTerm ? "No logs matching current filter" : `No logs captured for "${selectedWorker}" worker.`}
+                  </div>
+                );
+              }
+
+              return filtered.map((log, index) => {
+                const dateStr = new Date(log.timestamp).toLocaleTimeString();
+                
+                // Determine message color based on log level/message text
+                let msgColor = "#e2e8f0";
+                if (log.level === "error" || log.message.toLowerCase().includes("fail") || log.message.toLowerCase().includes("error")) {
+                  msgColor = "#ff4566";
+                } else if (log.level === "warn") {
+                  msgColor = "#ffb600";
+                } else if (log.message.startsWith("STEP")) {
+                  msgColor = "#00baff";
+                } else if (log.message.toLowerCase().includes("success") || log.message.toLowerCase().includes("finished")) {
+                  msgColor = "#22c55e";
+                }
+
+                return (
+                  <div key={log._id || index} style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem", wordBreak: "break-all" }}>
+                    <span style={{ color: "rgba(255, 255, 255, 0.25)", minWidth: "70px", userSelect: "none" }}>[{dateStr}]</span>
+                    <span style={{ color: log.level === "error" ? "#ff4566" : log.level === "warn" ? "#ffb600" : "#a1a1aa", minWidth: "45px", fontWeight: "bold", userSelect: "none" }}>
+                      {log.level.toUpperCase()}
+                    </span>
+                    <span style={{ color: msgColor, flex: 1 }}>{log.message}</span>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </div>
+      )}
+
       {activeTab === "developer" && (
         <div className="developer-container animate-fade-in" style={{ padding: "0 1rem" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem", alignItems: "start" }}>
-            {/* Control Panel */}
-            <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-              <h3 className="card-title" style={{ fontSize: "1.3rem", margin: 0 }}>🛠️ Scraper Scenario Testing</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "2rem", alignItems: "start" }}>
+            
+            {/* Left Column: Feature Testing Deck */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
               
-              <form onSubmit={handleTriggerScenario} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                <div className="input-group" style={{ margin: 0 }}>
-                  <label>Instagram Username</label>
-                  <input
-                    type="text"
-                    value={devUsername}
-                    onChange={(e) => setDevUsername(e.target.value)}
-                    placeholder="e.g. test_dev_user"
-                    className="input-field"
-                    style={{
-                      background: "rgba(255, 255, 255, 0.03)",
-                      border: "var(--glass-border)",
-                      borderRadius: "8px",
-                      color: "#fff",
-                      padding: "0.75rem"
-                    }}
-                  />
-                </div>
-                <div className="input-group" style={{ margin: 0 }}>
-                  <label>Select Test Scenario</label>
-                  <select
-                    value={devScenario}
-                    onChange={(e) => setDevScenario(e.target.value)}
-                    className="input-field"
-                    style={{ width: "100%", margin: 0, padding: "0.75rem" }}
-                  >
-                    <option value="success">Success Simulation (Capped at 12 posts)</option>
-                    <option value="timeout">Profile Timeout Protection (60s simulation)</option>
-                    <option value="large-account">Skip Extremely Large Account (&gt;500 posts)</option>
-                    <option value="private-account">Skip Private Account</option>
-                    <option value="failure">Failure Retry Strategy (BullMQ 2 attempts)</option>
-                  </select>
+              {/* Feature Test Grid */}
+              <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                <div>
+                  <h3 className="card-title" style={{ fontSize: "1.4rem", margin: 0 }}>🛠️ Feature Test Deck</h3>
+                  <p style={{ color: "var(--color-text-dim)", fontSize: "0.9rem", marginTop: "0.25rem" }}>
+                    Simulate edge cases, constraints, and stability behaviors locally without using live Instagram API sessions.
+                  </p>
                 </div>
                 
-                <button type="submit" className="btn btn-primary" disabled={devSubmitting}>
-                  {devSubmitting ? "Triggering..." : "Launch Scenario Job"}
-                </button>
-              </form>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  
+                  {/* Card 1: 12-Post Cap */}
+                  <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "1rem", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "1rem" }}>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                        <span style={{ fontSize: "1.1rem" }}>📝</span>
+                        <span style={{ fontSize: "0.7rem", background: "rgba(16, 185, 129, 0.15)", color: "var(--color-success)", padding: "0.15rem 0.35rem", borderRadius: "4px", fontWeight: "bold" }}>Task 1</span>
+                      </div>
+                      <h4 style={{ color: "#fff", fontSize: "0.95rem", fontWeight: "bold", margin: "0 0 0.25rem 0" }}>12-Post Scraping Cap</h4>
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", margin: 0, lineHeight: "1.4" }}>
+                        Simulates a profile scrape. Caps extraction and saving at exactly 12 posts.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleTriggerScenarioDirect("success", "cap_limit_user")}
+                      className="btn btn-primary"
+                      style={{ padding: "0.4rem", fontSize: "0.8rem", width: "100%", margin: 0 }}
+                      disabled={devSubmitting}
+                    >
+                      🚀 Run Test (@cap_limit_user)
+                    </button>
+                  </div>
 
-              {devError && <div className="toast toast-error">{devError}</div>}
-              {devSuccessMessage && <div className="toast toast-success" style={{ background: "rgba(34, 197, 94, 0.15)", color: "#22c55e", border: "1px solid rgba(34, 197, 94, 0.3)" }}>{devSuccessMessage}</div>}
+                  {/* Card 2: Private Account Skip */}
+                  <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "1rem", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "1rem" }}>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                        <span style={{ fontSize: "1.1rem" }}>🔒</span>
+                        <span style={{ fontSize: "0.7rem", background: "rgba(245, 158, 11, 0.15)", color: "var(--color-warning)", padding: "0.15rem 0.35rem", borderRadius: "4px", fontWeight: "bold" }}>Task 3</span>
+                      </div>
+                      <h4 style={{ color: "#fff", fontSize: "0.95rem", fontWeight: "bold", margin: "0 0 0.25rem 0" }}>Private Account Skip</h4>
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", margin: 0, lineHeight: "1.4" }}>
+                        Arrives at private account, skips execution, and saves skip reason.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleTriggerScenarioDirect("private-account", "private_user")}
+                      className="btn btn-primary"
+                      style={{ padding: "0.4rem", fontSize: "0.8rem", width: "100%", margin: 0 }}
+                      disabled={devSubmitting}
+                    >
+                      🚀 Run Test (@private_user)
+                    </button>
+                  </div>
 
-              <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
-                <h4 style={{ color: "#fff", marginBottom: "0.5rem" }}>🧹 Queue Maintenance</h4>
+                  {/* Card 3: Large Account Skip */}
+                  <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "1rem", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "1rem" }}>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                        <span style={{ fontSize: "1.1rem" }}>📈</span>
+                        <span style={{ fontSize: "0.7rem", background: "rgba(239, 68, 68, 0.15)", color: "var(--color-error)", padding: "0.15rem 0.35rem", borderRadius: "4px", fontWeight: "bold" }}>Task 3</span>
+                      </div>
+                      <h4 style={{ color: "#fff", fontSize: "0.95rem", fontWeight: "bold", margin: "0 0 0.25rem 0" }}>Large Account Skip</h4>
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", margin: 0, lineHeight: "1.4" }}>
+                        Detects post count &gt; 500, skips account, and saves skip reason.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleTriggerScenarioDirect("large-account", "large_influencer_user")}
+                      className="btn btn-primary"
+                      style={{ padding: "0.4rem", fontSize: "0.8rem", width: "100%", margin: 0 }}
+                      disabled={devSubmitting}
+                    >
+                      🚀 Run Test (@large_influencer_user)
+                    </button>
+                  </div>
+
+                  {/* Card 4: Scraper Timeout */}
+                  <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "1rem", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "1rem" }}>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                        <span style={{ fontSize: "1.1rem" }}>⏱️</span>
+                        <span style={{ fontSize: "0.7rem", background: "rgba(59, 130, 246, 0.15)", color: "var(--color-info)", padding: "0.15rem 0.35rem", borderRadius: "4px", fontWeight: "bold" }}>Task 2</span>
+                      </div>
+                      <h4 style={{ color: "#fff", fontSize: "0.95rem", fontWeight: "bold", margin: "0 0 0.25rem 0" }}>Scraper Timeout (60s)</h4>
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", margin: 0, lineHeight: "1.4" }}>
+                        Simulates browser hang. Aborts after 60s timeout and records skip.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleTriggerScenarioDirect("timeout", "timeout_stuck_user")}
+                      className="btn btn-primary"
+                      style={{ padding: "0.4rem", fontSize: "0.8rem", width: "100%", margin: 0 }}
+                      disabled={devSubmitting}
+                    >
+                      🚀 Run Test (@timeout_stuck_user)
+                    </button>
+                  </div>
+
+                  {/* Card 5: Retry & Backoff */}
+                  <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "1rem", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "1rem", gridColumn: "span 2" }}>
+                    <div style={{ display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+                      <span style={{ fontSize: "1.5rem" }}>🔄</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.25rem" }}>
+                          <h4 style={{ color: "#fff", fontSize: "0.95rem", fontWeight: "bold", margin: 0 }}>Retry Strategy (2 Attempts + Backoff)</h4>
+                          <span style={{ fontSize: "0.7rem", background: "rgba(124, 34, 228, 0.15)", color: "#c084fc", padding: "0.15rem 0.35rem", borderRadius: "4px", fontWeight: "bold" }}>Task 4</span>
+                        </div>
+                        <p style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", margin: 0, lineHeight: "1.4" }}>
+                          Simulates temporary connection errors. BullMQ automatically retries the job up to 2 times with a 5-second exponential delay.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleTriggerScenarioDirect("failure", "transient_fail_user")}
+                      className="btn btn-primary"
+                      style={{ padding: "0.45rem", fontSize: "0.85rem", width: "100%", margin: 0 }}
+                      disabled={devSubmitting}
+                    >
+                      🚀 Run Retry & Backoff Test (@transient_fail_user)
+                    </button>
+                  </div>
+
+                </div>
+
+                {/* Bulk Concurrency Simulator */}
+                <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "1.25rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <h4 style={{ color: "#fff", fontSize: "1rem", fontWeight: "bold", margin: 0 }}>⚡ Bulk Concurrency Simulator</h4>
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", margin: "0.15rem 0 0 0" }}>
+                        Triggers 5 jobs at once. Verifies active concurrency set to 5 parallel workers.
+                      </p>
+                    </div>
+                    <span style={{ fontSize: "0.7rem", background: "rgba(0, 216, 255, 0.15)", color: "var(--color-accent)", padding: "0.15rem 0.35rem", borderRadius: "4px", fontWeight: "bold" }}>Task 5</span>
+                  </div>
+                  <button
+                    onClick={handleTriggerConcurrencyTest}
+                    className="btn btn-secondary"
+                    style={{ border: "1px solid rgba(0, 216, 255, 0.3)", color: "var(--color-accent)", background: "rgba(0, 216, 255, 0.03)" }}
+                    disabled={devSubmitting}
+                  >
+                    🔥 Launch 5 Parallel Mock Jobs
+                  </button>
+                </div>
+
+              </div>
+
+              {/* Toast messages */}
+              {devError && <div className="toast toast-error" style={{ margin: 0 }}>{devError}</div>}
+              {devSuccessMessage && (
+                <div className="toast toast-success" style={{ margin: 0, background: "rgba(34, 197, 94, 0.12)", color: "#22c55e", border: "1px solid rgba(34, 197, 94, 0.25)" }}>
+                  {devSuccessMessage}
+                </div>
+              )}
+
+              {/* Queue Maintenance Panel */}
+              <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <h3 className="card-title" style={{ fontSize: "1.1rem", margin: 0, color: "#fff" }}>🧹 Queue Maintenance</h3>
+                <p style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", margin: 0, lineHeight: "1.4" }}>
+                  Drain and flush all waiting, active, completed, and failed jobs inside BullMQ.
+                </p>
                 <button
                   onClick={handleClearQueues}
                   className="btn btn-secondary"
-                  style={{ width: "100%", border: "1px solid rgba(239, 68, 68, 0.4)", color: "#ef4444" }}
+                  style={{ border: "1px solid rgba(239, 68, 68, 0.3)", color: "#ef4444", background: "rgba(239, 68, 68, 0.02)" }}
                   disabled={devSubmitting}
                 >
                   Clear & Drain BullMQ Queues
                 </button>
               </div>
+
             </div>
 
-            {/* Scenario Guides */}
-            <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-              <h3 className="card-title" style={{ fontSize: "1.3rem", margin: 0 }}>📖 Scenario Guides & Expected Results</h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: "1rem", fontSize: "0.85rem", color: "var(--color-text-dim)" }}>
-                <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.75rem", borderRadius: "6px" }}>
-                  <strong style={{ color: "#fff" }}>✓ Success Simulation</strong>: Executes step-by-step progress updating (Opening &gt; Loading &gt; Extracting &gt; Scraping &gt; Saving &gt; Completed). Capped at 12 posts limit.
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.75rem", borderRadius: "6px" }}>
-                  <strong style={{ color: "#ffb600" }}>⚠ Timeout (60s)</strong>: Simulates browser scrape hanging. Crap out at 60s, job marked as completed with status <strong style={{ color: "#fff" }}>skipped</strong> and reason <strong style={{ color: "#ffb600" }}>Timeout</strong>.
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.75rem", borderRadius: "6px" }}>
-                  <strong style={{ color: "#ff4566" }}>⚠ Large Account (&gt;500)</strong>: Returns profile data showing 1248 posts. Immediately skips and logs, return value reason is set to <strong style={{ color: "#ff4566" }}>Large Account</strong>.
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.75rem", borderRadius: "6px" }}>
-                  <strong style={{ color: "#ffb600" }}>⚠ Private Account</strong>: Navigates to a private page. Skips and sets status to skipped with reason <strong style={{ color: "#ffb600" }}>Private Account</strong>.
-                </div>
-                <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.75rem", borderRadius: "6px" }}>
-                  <strong style={{ color: "#ef4444" }}>✗ Failure Retry Strategy</strong>: Throws connection error. BullMQ retries once more (Attempt 1 - Fail, Attempt 2 - Fail) then marks job state as <strong style={{ color: "#ef4444" }}>failed</strong> with reason <strong style={{ color: "#ef4444" }}>Scrape Error</strong>.
+            {/* Right Column: Jobs Pipeline Monitor */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+              
+              {/* Queue Stats Counters */}
+              <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>⚙️ Queue Status</h3>
+                
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+                  <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "0.75rem", textAlign: "center", borderLeft: "3px solid #ffb600" }}>
+                    <div style={{ color: "var(--color-text-dim)", fontSize: "0.7rem", textTransform: "uppercase" }}>Waiting</div>
+                    <div style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#ffb600" }}>{queueStats?.waiting || 0}</div>
+                  </div>
+                  <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "0.75rem", textAlign: "center", borderLeft: "3px solid #00baff" }}>
+                    <div style={{ color: "var(--color-text-dim)", fontSize: "0.7rem", textTransform: "uppercase" }}>Active (Working)</div>
+                    <div style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#00baff" }}>{queueStats?.active || 0}</div>
+                  </div>
+                  <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "0.75rem", textAlign: "center", borderLeft: "3px solid #22c55e" }}>
+                    <div style={{ color: "var(--color-text-dim)", fontSize: "0.7rem", textTransform: "uppercase" }}>Completed</div>
+                    <div style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#22c55e" }}>{queueStats?.completed || 0}</div>
+                  </div>
+                  <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "0.75rem", textAlign: "center", borderLeft: "3px solid #ff4566" }}>
+                    <div style={{ color: "var(--color-text-dim)", fontSize: "0.7rem", textTransform: "uppercase" }}>Failed</div>
+                    <div style={{ fontSize: "1.4rem", fontWeight: "bold", color: "#ff4566" }}>{queueStats?.failed || 0}</div>
+                  </div>
                 </div>
               </div>
+
+              {/* Jobs Monitor Table */}
+              <div className="glass-card card-table" style={{ margin: 0, minHeight: "400px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+                  <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>📊 Pipeline Telemetry</h3>
+                  <button onClick={fetchAllJobs} className="btn btn-secondary" style={{ padding: "0.25rem 0.5rem", fontSize: "0.7rem", minWidth: "auto", margin: 0 }}>
+                    🔄 Refresh
+                  </button>
+                </div>
+
+                {jobsLoading && allJobs.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "3rem" }}>
+                    <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
+                    <p style={{ color: "var(--color-text-dim)", fontSize: "0.85rem" }}>Loading jobs...</p>
+                  </div>
+                ) : allJobs.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "4rem 0", color: "var(--color-text-dim)" }}>
+                    <span style={{ fontSize: "2rem" }}>📭</span>
+                    <p style={{ fontSize: "0.85rem", marginTop: "0.5rem" }}>No jobs tracked in the queue.</p>
+                  </div>
+                ) : (
+                  <div className="table-responsive" style={{ maxHeight: "450px", overflowY: "auto" }}>
+                    <table className="leads-table">
+                      <thead>
+                        <tr>
+                          <th>Target</th>
+                          <th>Status</th>
+                          <th>Progress</th>
+                          <th>Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allJobs.slice(0, 15).map((j) => {
+                          const getStatusBadge = (state: string) => {
+                            const s = state.toLowerCase();
+                            if (s === "completed") return <span className="status-badge status-completed">Completed</span>;
+                            if (s === "active") return <span className="status-badge status-active" style={{ background: "#00baff15", color: "#00baff", borderColor: "#00baff" }}>Working</span>;
+                            if (s === "waiting") return <span className="status-badge status-delayed" style={{ background: "#ffb60015", color: "#ffb600", borderColor: "#ffb600" }}>Waiting</span>;
+                            if (s === "failed") return <span className="status-badge status-failed">Failed</span>;
+                            return <span className="status-badge">{state.toUpperCase()}</span>;
+                          };
+
+                          const formatProgress = () => {
+                            if (j.state === "completed") return "100%";
+                            if (j.state === "failed") return "Failed";
+                            if (typeof j.progress === "object" && j.progress !== null) {
+                              return `${j.progress.percent || 0}%`;
+                            }
+                            return `${j.progress || 0}%`;
+                          };
+
+                          return (
+                            <tr key={j.id} className="lead-row" style={{ fontSize: "0.8rem" }}>
+                              <td>
+                                <strong style={{ color: "#fff" }}>
+                                  {j.queue === "discovery" ? `#${j.data?.hashtag}` : `@${j.data?.username}`}
+                                </strong>
+                                {j.state === "active" && j.processedOn && (
+                                  <div style={{ fontSize: "0.7rem", color: "var(--color-text-dim)", marginTop: "0.1rem" }}>
+                                    Elapsed: {Math.floor((Date.now() - j.processedOn) / 1000)}s
+                                  </div>
+                                )}
+                              </td>
+                              <td>{getStatusBadge(j.state)}</td>
+                              <td>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+                                  <span>{formatProgress()}</span>
+                                  {j.state === "active" && typeof j.progress === "object" && j.progress !== null && j.progress.stage && (
+                                    <span style={{ fontSize: "0.7rem", color: "var(--color-accent)" }}>{j.progress.stage}</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                {(() => {
+                                  if (j.state === "failed") return <span style={{ color: "#ff4566" }}>Scrape Error</span>;
+                                  if (j.state === "completed" && j.returnvalue && j.returnvalue.status === "skipped") {
+                                    const r = j.returnvalue.reason;
+                                    if (r === "Timeout") return <span style={{ color: "#ffb600" }}>Timeout</span>;
+                                    if (r === "SKIPPED_LARGE_ACCOUNT") return <span style={{ color: "#ff4566" }}>Large Account</span>;
+                                    if (r === "Private Account") return <span style={{ color: "#ffb600" }}>Private Account</span>;
+                                    return <span style={{ color: "var(--color-text-dim)" }}>{r || "Skipped"}</span>;
+                                  }
+                                  return <span style={{ color: "var(--color-text-dim)" }}>—</span>;
+                                })()}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
             </div>
+
           </div>
         </div>
-
       )}
 
       {activeTab === "crm" && (
         <div className="crm-container animate-fade-in" style={{ padding: "0 1rem" }}>
-          
+
           {/* Header/Controls bar */}
           <div className="glass-card" style={{ padding: "1.5rem", marginBottom: "2rem" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "1rem" }}>
@@ -1922,10 +2370,10 @@ export default function App() {
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: "1.5rem", alignItems: "start" }}>
-              
+
               {/* Left Column: High Priority Queue & Activity Feed */}
               <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-                
+
                 {/* High Priority leads panel */}
                 <div className="glass-card" style={{ padding: "1.25rem", borderLeft: "4px solid #ff4566" }}>
                   <h3 style={{ fontSize: "1.1rem", fontWeight: "bold", color: "#fff", marginTop: 0, marginBottom: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1955,7 +2403,7 @@ export default function App() {
                   <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", maxHeight: "350px", overflowY: "auto", paddingRight: "0.25rem" }}>
                     {crmActivity.map((act) => {
                       const displayType = (type: string) => {
-                        switch(type) {
+                        switch (type) {
                           case "created": return "🆕 Created";
                           case "assigned": return "👤 Assigned";
                           case "note_added": return "📝 Note Added";
@@ -1967,12 +2415,12 @@ export default function App() {
                         }
                       };
                       return (
-                        <div key={act._id} style={{ 
-                          fontSize: "0.8rem", 
-                          padding: "0.5rem 0.75rem", 
-                          background: "rgba(255,255,255,0.01)", 
-                          border: "1px solid rgba(255,255,255,0.05)", 
-                          borderRadius: "6px" 
+                        <div key={act._id} style={{
+                          fontSize: "0.8rem",
+                          padding: "0.5rem 0.75rem",
+                          background: "rgba(255,255,255,0.01)",
+                          border: "1px solid rgba(255,255,255,0.05)",
+                          borderRadius: "6px"
                         }}>
                           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", color: "#fff", marginBottom: "0.15rem" }}>
                             <span>@{act.username}</span>
@@ -2024,13 +2472,13 @@ export default function App() {
                   overflowX: "auto",
                   paddingBottom: "1rem"
                 }}>
-                  
+
                   {/* Status Columns mapping */}
                   {(["new", "contacted", "interested", "qualified", "converted", "lost"] as const).map((colStatus) => {
                     const leadsInCol = crmLeads.filter(l => l.status === colStatus);
-                    
+
                     const getColColor = (status: string) => {
-                      switch(status) {
+                      switch (status) {
                         case "new": return "#fff";
                         case "contacted": return "var(--color-accent)";
                         case "interested": return "var(--color-primary)";
@@ -2042,7 +2490,7 @@ export default function App() {
                     };
 
                     const getColTitle = (status: string) => {
-                      switch(status) {
+                      switch (status) {
                         case "new": return "New";
                         case "contacted": return "Contacted";
                         case "interested": return "Interested";
@@ -2088,14 +2536,14 @@ export default function App() {
                         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", flex: 1, overflowY: "auto", maxHeight: "600px" }}>
                           {leadsInCol.map(lead => renderCrmLeadCard(lead))}
                           {leadsInCol.length === 0 && (
-                            <div style={{ 
-                              flex: 1, 
-                              display: "flex", 
-                              alignItems: "center", 
-                              justifyContent: "center", 
-                              color: "var(--color-text-dim)", 
-                              fontSize: "0.75rem", 
-                              border: "1px dashed rgba(255,255,255,0.05)", 
+                            <div style={{
+                              flex: 1,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: "var(--color-text-dim)",
+                              fontSize: "0.75rem",
+                              border: "1px dashed rgba(255,255,255,0.05)",
                               borderRadius: "6px",
                               padding: "2rem 0",
                               textAlign: "center"
@@ -2186,7 +2634,7 @@ export default function App() {
 
             {selectedInboxLeadDetails && (
               <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", marginTop: "1rem" }}>
-                
+
                 {/* Metrics Row */}
                 <div style={{
                   display: "grid",
@@ -2346,10 +2794,10 @@ export default function App() {
 
             {selectedCrmDetails && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginTop: "1rem" }}>
-                
+
                 {/* Left Side: Profile Details & Updates */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                  
+
                   {/* Summary & Metrics */}
                   <div className="glass-card" style={{ padding: "1rem", background: "rgba(255,255,255,0.02)" }}>
                     <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
@@ -2368,7 +2816,7 @@ export default function App() {
                     <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
                       ⚙️ Manage Lead
                     </h3>
-                    
+
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                       <div>
                         <label style={{ display: "block", fontSize: "0.75rem", color: "var(--color-text-dim)", marginBottom: "0.25rem", fontWeight: "bold" }}>
@@ -2453,7 +2901,7 @@ export default function App() {
 
                 {/* Right Side: Timeline, Internal Notes & Log Feed */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                  
+
                   {/* Internal Notes */}
                   <div className="glass-card" style={{ padding: "1rem" }}>
                     <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
@@ -2461,9 +2909,9 @@ export default function App() {
                     </h3>
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", maxHeight: "150px", overflowY: "auto", marginBottom: "0.75rem", paddingRight: "0.25rem" }}>
                       {(selectedCrmDetails.pipeline?.notes || []).map((note: any, idx: number) => (
-                        <div key={idx} style={{ 
-                          background: "rgba(255,255,255,0.02)", 
-                          padding: "0.5rem 0.75rem", 
+                        <div key={idx} style={{
+                          background: "rgba(255,255,255,0.02)",
+                          padding: "0.5rem 0.75rem",
                           borderRadius: "6px",
                           border: "1px solid rgba(255,255,255,0.04)"
                         }}>
@@ -2500,7 +2948,7 @@ export default function App() {
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", maxHeight: "180px", overflowY: "auto", paddingRight: "0.25rem" }}>
                       {(selectedCrmDetails.activity || []).map((act: any) => {
                         const displayType = (type: string) => {
-                          switch(type) {
+                          switch (type) {
                             case "created": return "🆕 Created";
                             case "assigned": return "👤 Assigned";
                             case "note_added": return "📝 Note Added";
@@ -2512,12 +2960,12 @@ export default function App() {
                           }
                         };
                         return (
-                          <div key={act._id} style={{ 
-                            fontSize: "0.8rem", 
-                            padding: "0.4rem 0.6rem", 
-                            background: "rgba(255,255,255,0.01)", 
-                            border: "1px solid rgba(255,255,255,0.04)", 
-                            borderRadius: "4px" 
+                          <div key={act._id} style={{
+                            fontSize: "0.8rem",
+                            padding: "0.4rem 0.6rem",
+                            background: "rgba(255,255,255,0.01)",
+                            border: "1px solid rgba(255,255,255,0.04)",
+                            borderRadius: "4px"
                           }}>
                             <div style={{ display: "flex", justifyContent: "space-between", fontWeight: "bold", color: "#fff", marginBottom: "0.1rem" }}>
                               <span>{displayType(act.type)}</span>

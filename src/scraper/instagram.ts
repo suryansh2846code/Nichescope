@@ -44,6 +44,17 @@ const INSTAGRAM_BASE_URL = "https://www.instagram.com";
 export const MAX_POSTS_PER_PROFILE = 12;
 export const PROFILE_TIMEOUT_MS = 60000;
 
+async function safeCloseBrowser(browser: any) {
+  try {
+    await Promise.race([
+      browser.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Browser close timeout")), 2000))
+    ]);
+  } catch (err) {
+    console.error("Warning: browser close failed or timed out:", err instanceof Error ? err.message : String(err));
+  }
+}
+
 export function parseInstagramCount(value: string): number {
   const normalized = value.replace(/,/g, "").trim().toLowerCase();
   const match = normalized.match(/^([\d.]+)\s*([kmb])?$/);
@@ -233,45 +244,56 @@ export async function extractPosts(
 
   const scrapedPosts: ScrapedPost[] = [];
   for (const url of targetUrls) {
-    try {
-      console.log(`Scraping post: ${url}`);
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
-      await page.waitForTimeout(1000);
+    let attempts = 0;
+    let success = false;
+    while (attempts < 2 && !success) {
+      try {
+        console.log(`Scraping post: ${url} (Attempt ${attempts + 1}/2)`);
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 10000 });
+        await page.waitForTimeout(1000);
 
-      const desc = await page.evaluate(() => {
-        const getMeta = (selector: string) =>
-          document.querySelector<HTMLMetaElement>(selector)?.content || "";
-        return getMeta('meta[property="og:description"]') || getMeta('meta[name="description"]');
-      });
+        const desc = await page.evaluate(() => {
+          const getMeta = (selector: string) =>
+            document.querySelector<HTMLMetaElement>(selector)?.content || "";
+          return getMeta('meta[property="og:description"]') || getMeta('meta[name="description"]');
+        });
 
-      if (desc) {
-        const parsed = parsePostMetaDescription(desc);
-        if (parsed) {
-          const match = url.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
-          const postId = match ? match[1] : url;
+        if (desc) {
+          const parsed = parsePostMetaDescription(desc);
+          if (parsed) {
+            const match = url.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
+            const postId = match ? match[1] : url;
 
-          const hashtags = extractHashtags(parsed.caption);
-          const mentions = extractMentions(parsed.caption);
+            const hashtags = extractHashtags(parsed.caption);
+            const mentions = extractMentions(parsed.caption);
 
-          scrapedPosts.push({
-            postId,
-            caption: parsed.caption,
-            postUrl: url,
-            postedAt: parsed.dateStr ? new Date(parsed.dateStr) : undefined,
-            likes: parsed.likes !== null ? parsed.likes : undefined,
-            commentsCount: parsed.commentsCount !== null ? parsed.commentsCount : undefined,
-            hashtags,
-            mentions,
-          });
+            scrapedPosts.push({
+              postId,
+              caption: parsed.caption,
+              postUrl: url,
+              postedAt: parsed.dateStr ? new Date(parsed.dateStr) : undefined,
+              likes: parsed.likes !== null ? parsed.likes : undefined,
+              commentsCount: parsed.commentsCount !== null ? parsed.commentsCount : undefined,
+              hashtags,
+              mentions,
+            });
+            success = true;
+          } else {
+            console.warn(`Could not parse metadata pattern from meta description for post: ${url}`);
+            success = true; // Don't retry parsing errors
+          }
         } else {
-          console.warn(`Could not parse metadata pattern from meta description for post: ${url}`);
+          console.warn(`No meta description tag found for post: ${url}`);
+          success = true; // Don't retry missing tag errors
         }
-      } else {
-        console.warn(`No meta description tag found for post: ${url}`);
+      } catch (err) {
+        attempts++;
+        console.error(`Failed to extract post details from ${url} (Attempt ${attempts}/2):`, err instanceof Error ? err.message : String(err));
+        if (attempts < 2) {
+          console.log(`Retrying post scrape for: ${url}`);
+          await page.waitForTimeout(1000);
+        }
       }
-    } catch (err) {
-      console.error(`Failed to extract post details from ${url}:`, err instanceof Error ? err.message : String(err));
-      // Log failure but continue processing remaining posts
     }
   }
 
@@ -346,62 +368,86 @@ export async function scrapeProfile(
     }
   }
 
-  const profileUrl = `${INSTAGRAM_BASE_URL}/${cleanUsername}/`;
-  const browser = await chromium.launch({
-    headless: options.headless ?? true,
-  });
+  let attempts = 0;
+  const maxAttempts = 2;
+  let lastError: any;
 
-  let timeoutId: any;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error("TIMEOUT"));
-    }, PROFILE_TIMEOUT_MS);
-  });
+  while (attempts < maxAttempts) {
+    attempts++;
+    console.log(`Starting profile scrape for @${cleanUsername} (Attempt ${attempts}/${maxAttempts})`);
 
-  const scrapeAction = (async () => {
-    const page = await browser.newPage({
-      userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    const profileUrl = `${INSTAGRAM_BASE_URL}/${cleanUsername}/`;
+    const browser = await chromium.launch({
+      headless: options.headless ?? true,
     });
 
-    if (options.onStep) options.onStep(1); // Opening profile
-    console.log(`Navigating to profile: ${profileUrl}`);
-    await page.goto(profileUrl, {
-      waitUntil: "networkidle",
-      timeout: options.timeoutMs ?? 30_000,
+    let timeoutId: any;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error("TIMEOUT"));
+      }, PROFILE_TIMEOUT_MS);
     });
 
-    if (options.onStep) options.onStep(2); // Extracting profile
-    const isPrivate = await page.evaluate(() => {
-      const bodyText = document.body.innerText;
-      return bodyText.includes("This Account is Private") || bodyText.includes("This account is private");
-    });
-    if (isPrivate) {
-      throw new Error("PRIVATE_ACCOUNT");
+    const scrapeAction = (async () => {
+      const page = await browser.newPage({
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      });
+
+      if (options.onStep) options.onStep(1); // Opening profile
+      console.log(`Navigating to profile: ${profileUrl}`);
+      await page.goto(profileUrl, {
+        waitUntil: "networkidle",
+        timeout: options.timeoutMs ?? 30_000,
+      });
+
+      if (options.onStep) options.onStep(2); // Extracting profile
+      const isPrivate = await page.evaluate(() => {
+        const bodyText = document.body.innerText;
+        return bodyText.includes("This Account is Private") || bodyText.includes("This account is private");
+      });
+      if (isPrivate) {
+        throw new Error("PRIVATE_ACCOUNT");
+      }
+
+      const profile = await extractProfileData(page, cleanUsername);
+      if (profile.postCount > 500) {
+        throw new Error(`SKIPPED_LARGE_ACCOUNT:${profile.postCount}`);
+      }
+
+      console.log(`Found ${profile.postCount} posts`);
+      console.log(`Limiting scrape to latest ${MAX_POSTS_PER_PROFILE} posts`);
+      const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep);
+
+      return {
+        profile,
+        posts,
+      };
+    })();
+
+    try {
+      const result = await Promise.race([scrapeAction, timeoutPromise]);
+      return result;
+    } catch (err: any) {
+      lastError = err;
+      console.error(`Profile scrape attempt ${attempts} failed for @${cleanUsername}:`, err instanceof Error ? err.message : String(err));
+      
+      // Do not retry private accounts or large accounts as they are skip rules
+      if (err.message === "PRIVATE_ACCOUNT" || err.message.startsWith("SKIPPED_LARGE_ACCOUNT:")) {
+        throw err;
+      }
+
+      if (attempts < maxAttempts) {
+        console.log(`Retrying profile scrape for @${cleanUsername} in 2 seconds...`);
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      await safeCloseBrowser(browser);
     }
-
-    const profile = await extractProfileData(page, cleanUsername);
-    if (profile.postCount > 500) {
-      throw new Error(`SKIPPED_LARGE_ACCOUNT:${profile.postCount}`);
-    }
-
-    console.log(`Found ${profile.postCount} posts`);
-    console.log(`Limiting scrape to latest ${MAX_POSTS_PER_PROFILE} posts`);
-    const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep);
-
-    return {
-      profile,
-      posts,
-    };
-  })();
-
-  try {
-    const result = await Promise.race([scrapeAction, timeoutPromise]);
-    return result;
-  } finally {
-    clearTimeout(timeoutId);
-    await browser.close();
   }
+
+  throw lastError;
 }
 
 export interface DiscoveredUser {
@@ -475,32 +521,44 @@ export async function scrapeHashtag(
 
     const discoveries: DiscoveredUser[] = [];
     for (const url of targetUrls) {
-      try {
-        console.log(`Scraping post to discover author: ${url}`);
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
-        await page.waitForTimeout(1000);
+      let attempts = 0;
+      let success = false;
+      while (attempts < 2 && !success) {
+        try {
+          console.log(`Scraping post to discover author: ${url} (Attempt ${attempts + 1}/2)`);
+          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 10000 });
+          await page.waitForTimeout(1000);
 
-        const desc = await page.evaluate(() => {
-          const getMeta = (selector: string) =>
-            document.querySelector<HTMLMetaElement>(selector)?.content || "";
-          return getMeta('meta[property="og:description"]') || getMeta('meta[name="description"]');
-        });
+          const desc = await page.evaluate(() => {
+            const getMeta = (selector: string) =>
+              document.querySelector<HTMLMetaElement>(selector)?.content || "";
+            return getMeta('meta[property="og:description"]') || getMeta('meta[name="description"]');
+          });
 
-        if (desc) {
-          const parsed = parsePostMetaDescription(desc);
-          if (parsed && parsed.username) {
-            discoveries.push({
-              username: parsed.username.toLowerCase(),
-              sourcePostUrl: url,
-            });
+          if (desc) {
+            const parsed = parsePostMetaDescription(desc);
+            if (parsed && parsed.username) {
+              discoveries.push({
+                username: parsed.username.toLowerCase(),
+                sourcePostUrl: url,
+              });
+              success = true;
+            } else {
+              console.warn(`Could not extract username from description for post: ${url}`);
+              success = true; // Don't retry parsing/extraction issues
+            }
           } else {
-            console.warn(`Could not extract username from description for post: ${url}`);
+            console.warn(`No description found for post: ${url}`);
+            success = true; // Don't retry missing tag errors
           }
-        } else {
-          console.warn(`No description found for post: ${url}`);
+        } catch (err) {
+          attempts++;
+          console.error(`Failed to scrape post author from ${url} (Attempt ${attempts}/2):`, err instanceof Error ? err.message : String(err));
+          if (attempts < 2) {
+            console.log(`Retrying post scrape for author: ${url}`);
+            await page.waitForTimeout(1000);
+          }
         }
-      } catch (err) {
-        console.error(`Failed to scrape post author from ${url}:`, err instanceof Error ? err.message : String(err));
       }
     }
 
@@ -518,7 +576,7 @@ export async function scrapeHashtag(
       discoveries: uniqueDiscoveries,
     };
   } finally {
-    await browser.close();
+    await safeCloseBrowser(browser);
   }
 }
 

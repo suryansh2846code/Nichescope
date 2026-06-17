@@ -11,6 +11,7 @@ import { startMonitoringScheduler } from "./services/trends/scheduler";
 import monitoringRouter from "./routes/monitoring";
 import crmRouter from "./routes/crm";
 import devRouter from "./routes/dev";
+import logsRouter from "./routes/logs";
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -75,6 +76,9 @@ app.use("/crm", crmRouter);
 
 console.log("Mounted /dev routes");
 app.use("/dev", devRouter);
+
+console.log("Mounted /logs routes");
+app.use("/logs", logsRouter);
 
 console.log("Routes Registered");
 

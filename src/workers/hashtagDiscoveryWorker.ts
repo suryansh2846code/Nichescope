@@ -6,6 +6,10 @@ import { scrapeHashtag } from "../scraper/instagram";
 import { Lead } from "../models/Lead";
 import { HashtagDiscovery } from "../models/HashtagDiscovery";
 import { scrapeQueue, SCRAPE_PROFILE_JOB_NAME } from "../queues/scrapeQueue";
+import { setupWorkerLogger } from "../utils/logger";
+
+// Setup logging interceptor
+setupWorkerLogger("discovery");
 
 // Connect to MongoDB
 try {

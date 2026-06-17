@@ -5,6 +5,10 @@ import { SCRAPE_QUEUE_NAME, type ScrapeJobData } from "../queues/scrapeQueue";
 import { scrapeProfile } from "../scraper/instagram";
 import { saveOrUpdateScrapedProfile } from "./saveLead";
 import { saveOrUpdatePosts } from "./savePost";
+import { setupWorkerLogger } from "../utils/logger";
+
+// Setup logging interceptor
+setupWorkerLogger("scraper");
 
 // Connect to MongoDB
 try {

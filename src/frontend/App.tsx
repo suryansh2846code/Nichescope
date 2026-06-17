@@ -980,6 +980,11 @@ export default function App() {
                   {job && (
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", fontSize: "0.8rem" }}>
                       <div>Status: <span style={{ color: "var(--color-accent)" }}>{job.state.toUpperCase()}</span></div>
+                      {job.state === "active" && job.processedOn && (
+                        <div style={{ color: "var(--color-text-dim)" }}>
+                          Elapsed: {Math.floor((Date.now() - job.processedOn) / 1000)}s
+                        </div>
+                      )}
                       {typeof job.progress === "object" && job.progress !== null ? (
                         <>
                           <div>
@@ -1171,6 +1176,11 @@ export default function App() {
                           <td style={{ textTransform: "capitalize", fontWeight: "bold" }}>{j.queue}</td>
                           <td>
                             <strong style={{ color: "#fff" }}>{getTargetValue()}</strong>
+                            {j.state === "active" && j.processedOn && (
+                              <div style={{ fontSize: "0.75rem", color: "var(--color-text-dim)", marginTop: "0.15rem" }}>
+                                Elapsed: {Math.floor((Date.now() - j.processedOn) / 1000)}s
+                              </div>
+                            )}
                           </td>
                           <td>{getStatusBadge(j.state)}</td>
                           <td>

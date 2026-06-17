@@ -37,6 +37,7 @@ interface ScrapeProfileOptions {
   timeoutMs?: number;
   maxPosts?: number;
   onStep?: (step: number) => void;
+  testScenario?: string;
 }
 
 const INSTAGRAM_BASE_URL = "https://www.instagram.com";
@@ -285,6 +286,64 @@ export async function scrapeProfile(
 
   if (!cleanUsername) {
     throw new Error("Instagram username is required");
+  }
+
+  // Handle mock test scenario
+  if (options.testScenario) {
+    const scenario = options.testScenario;
+    if (options.onStep) options.onStep(1); // Opening profile
+    await new Promise(r => setTimeout(r, 1000));
+    
+    if (scenario === "timeout") {
+      if (options.onStep) options.onStep(3); // Loading posts
+      await new Promise(r => setTimeout(r, 1000));
+      throw new Error("TIMEOUT");
+    }
+    if (scenario === "private-account") {
+      if (options.onStep) options.onStep(2); // Extracting profile
+      await new Promise(r => setTimeout(r, 500));
+      throw new Error("PRIVATE_ACCOUNT");
+    }
+    if (scenario === "large-account") {
+      if (options.onStep) options.onStep(2); // Extracting profile
+      await new Promise(r => setTimeout(r, 500));
+      throw new Error("SKIPPED_LARGE_ACCOUNT:1248");
+    }
+    if (scenario === "failure") {
+      if (options.onStep) options.onStep(3); // Loading posts
+      await new Promise(r => setTimeout(r, 1000));
+      throw new Error("Simulated transient connection failure");
+    }
+    if (scenario === "success") {
+      if (options.onStep) options.onStep(2); // Extracting profile
+      await new Promise(r => setTimeout(r, 500));
+      if (options.onStep) options.onStep(3); // Loading posts
+      await new Promise(r => setTimeout(r, 500));
+      if (options.onStep) options.onStep(4); // Visiting posts
+      await new Promise(r => setTimeout(r, 1000));
+      return {
+        profile: {
+          username: cleanUsername,
+          fullName: "Mock User",
+          bio: "Mock Bio",
+          followerCount: 1500,
+          followingCount: 300,
+          postCount: 12,
+          profileUrl: `${INSTAGRAM_BASE_URL}/${cleanUsername}/`,
+          scrapedAt: new Date(),
+          rawData: { title: "Mock", description: "Mock", canonicalUrl: "" }
+        },
+        posts: [
+          {
+            postId: "mock-post-1",
+            caption: "Trigger dev test hashtag #dev-test",
+            postUrl: `${INSTAGRAM_BASE_URL}/p/mock-post-1/`,
+            hashtags: ["dev-test"],
+            mentions: []
+          }
+        ]
+      };
+    }
   }
 
   const profileUrl = `${INSTAGRAM_BASE_URL}/${cleanUsername}/`;

@@ -24,6 +24,7 @@ const worker = new Worker<ScrapeJobData>(
     try {
       // scrapeProfile returns both profile and posts
       const { profile, posts } = await scrapeProfile(username, {
+        testScenario: job.data.testScenario,
         onStep: async (step) => {
           if (step === 1) {
             console.log("STEP 1: Opening profile");

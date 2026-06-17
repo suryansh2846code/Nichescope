@@ -10,6 +10,7 @@ import searchRouter from "./routes/search";
 import { startMonitoringScheduler } from "./services/trends/scheduler";
 import monitoringRouter from "./routes/monitoring";
 import crmRouter from "./routes/crm";
+import devRouter from "./routes/dev";
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -71,6 +72,9 @@ app.use("/monitoring", monitoringRouter);
 
 console.log("Mounted /crm routes");
 app.use("/crm", crmRouter);
+
+console.log("Mounted /dev routes");
+app.use("/dev", devRouter);
 
 console.log("Routes Registered");
 

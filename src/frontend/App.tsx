@@ -99,7 +99,7 @@ interface LeadPipelineResult {
 
 export default function App() {
   // Navigation
-  const [activeTab, setActiveTab] = useState<"discovery" | "hashtag-discovery" | "qualified" | "crm" | "settings">("discovery");
+  const [activeTab, setActiveTab] = useState<"discovery" | "hashtag-discovery" | "qualified" | "crm" | "settings" | "developer">("discovery");
 
   // Lead Inbox Tab State
   const [qualifiedLeads, setQualifiedLeads] = useState<any[]>([]);
@@ -164,6 +164,16 @@ export default function App() {
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [queueStats, setQueueStats] = useState<{ waiting: number; active: number; completed: number; failed: number } | null>(null);
+
+  // Developer Mode State
+  const [isDevMode, setIsDevMode] = useState<boolean>(() => {
+    return localStorage.getItem("isDevMode") === "true";
+  });
+  const [devUsername, setDevUsername] = useState("");
+  const [devScenario, setDevScenario] = useState("success");
+  const [devSubmitting, setDevSubmitting] = useState(false);
+  const [devError, setDevError] = useState<string | null>(null);
+  const [devSuccessMessage, setDevSuccessMessage] = useState<string | null>(null);
 
   // Add to CRM Handler
   const handleAddToCrm = async (username: string) => {
@@ -300,6 +310,53 @@ export default function App() {
       console.error("Error fetching queue stats:", err);
     }
   }, []);
+
+  const handleTriggerScenario = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDevError(null);
+    setDevSuccessMessage(null);
+    const username = devUsername.trim();
+    if (!username) {
+      setDevError("Username is required");
+      return;
+    }
+    setDevSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/dev/trigger-scenario`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenario: devScenario, username })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to trigger scenario");
+      }
+      const data = await res.json();
+      setDevSuccessMessage(`Scenario ${devScenario} triggered! Job ID: ${data.jobId}`);
+      setActiveJobId(data.jobId);
+      setDevUsername("");
+    } catch (err) {
+      setDevError(err instanceof Error ? err.message : "Error triggering scenario");
+    } finally {
+      setDevSubmitting(false);
+    }
+  };
+
+  const handleClearQueues = async () => {
+    if (!confirm("Are you sure you want to clear/drain both BullMQ queues?")) return;
+    setDevError(null);
+    setDevSuccessMessage(null);
+    setDevSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/dev/clear-queues`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to clear queues");
+      setDevSuccessMessage("BullMQ queues successfully drained!");
+    } catch (err) {
+      setDevError(err instanceof Error ? err.message : "Error clearing queues");
+    } finally {
+      setDevSubmitting(false);
+    }
+  };
 
   // Fetch Monitoring Telemetry Data
   const fetchMonitoringData = useCallback(async () => {
@@ -774,6 +831,15 @@ export default function App() {
         >
           ⚙️ Settings
         </button>
+        {isDevMode && (
+          <button
+            className={`tab-btn ${activeTab === "developer" ? "active" : ""}`}
+            onClick={() => setActiveTab("developer")}
+            style={{ border: "1px dashed var(--color-accent)", color: "var(--color-accent)" }}
+          >
+            🛠️ Dev Panel
+          </button>
+        )}
       </div>
 
       {activeTab === "discovery" && (
@@ -1610,8 +1676,115 @@ export default function App() {
                 </table>
               </div>
             )}
+
+            {/* Developer Settings Card */}
+            <div style={{ marginTop: "2rem", paddingTop: "2rem", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+              <h3 style={{ fontSize: "1.2rem", color: "#fff", marginBottom: "0.5rem" }}>🛠️ Developer Configuration</h3>
+              <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+                <label className="switch" style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={isDevMode}
+                    onChange={(e) => {
+                      setIsDevMode(e.target.checked);
+                      localStorage.setItem("isDevMode", e.target.checked ? "true" : "false");
+                    }}
+                    style={{ cursor: "pointer" }}
+                  />
+                  <span style={{ fontSize: "0.9rem", color: "#fff", fontWeight: "bold" }}>Enable Developer Mode Panel</span>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
+      )}
+
+      {activeTab === "developer" && (
+        <div className="developer-container animate-fade-in" style={{ padding: "0 1rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem", alignItems: "start" }}>
+            {/* Control Panel */}
+            <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+              <h3 className="card-title" style={{ fontSize: "1.3rem", margin: 0 }}>🛠️ Scraper Scenario Testing</h3>
+              
+              <form onSubmit={handleTriggerScenario} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div className="input-group" style={{ margin: 0 }}>
+                  <label>Instagram Username</label>
+                  <input
+                    type="text"
+                    value={devUsername}
+                    onChange={(e) => setDevUsername(e.target.value)}
+                    placeholder="e.g. test_dev_user"
+                    className="input-field"
+                    style={{
+                      background: "rgba(255, 255, 255, 0.03)",
+                      border: "var(--glass-border)",
+                      borderRadius: "8px",
+                      color: "#fff",
+                      padding: "0.75rem"
+                    }}
+                  />
+                </div>
+                <div className="input-group" style={{ margin: 0 }}>
+                  <label>Select Test Scenario</label>
+                  <select
+                    value={devScenario}
+                    onChange={(e) => setDevScenario(e.target.value)}
+                    className="input-field"
+                    style={{ width: "100%", margin: 0, padding: "0.75rem" }}
+                  >
+                    <option value="success">Success Simulation (Capped at 12 posts)</option>
+                    <option value="timeout">Profile Timeout Protection (60s simulation)</option>
+                    <option value="large-account">Skip Extremely Large Account (&gt;500 posts)</option>
+                    <option value="private-account">Skip Private Account</option>
+                    <option value="failure">Failure Retry Strategy (BullMQ 2 attempts)</option>
+                  </select>
+                </div>
+                
+                <button type="submit" className="btn btn-primary" disabled={devSubmitting}>
+                  {devSubmitting ? "Triggering..." : "Launch Scenario Job"}
+                </button>
+              </form>
+
+              {devError && <div className="toast toast-error">{devError}</div>}
+              {devSuccessMessage && <div className="toast toast-success" style={{ background: "rgba(34, 197, 94, 0.15)", color: "#22c55e", border: "1px solid rgba(34, 197, 94, 0.3)" }}>{devSuccessMessage}</div>}
+
+              <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid rgba(255, 255, 255, 0.08)" }}>
+                <h4 style={{ color: "#fff", marginBottom: "0.5rem" }}>🧹 Queue Maintenance</h4>
+                <button
+                  onClick={handleClearQueues}
+                  className="btn btn-secondary"
+                  style={{ width: "100%", border: "1px solid rgba(239, 68, 68, 0.4)", color: "#ef4444" }}
+                  disabled={devSubmitting}
+                >
+                  Clear & Drain BullMQ Queues
+                </button>
+              </div>
+            </div>
+
+            {/* Scenario Guides */}
+            <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <h3 className="card-title" style={{ fontSize: "1.3rem", margin: 0 }}>📖 Scenario Guides & Expected Results</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: "1rem", fontSize: "0.85rem", color: "var(--color-text-dim)" }}>
+                <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.75rem", borderRadius: "6px" }}>
+                  <strong style={{ color: "#fff" }}>✓ Success Simulation</strong>: Executes step-by-step progress updating (Opening &gt; Loading &gt; Extracting &gt; Scraping &gt; Saving &gt; Completed). Capped at 12 posts limit.
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.75rem", borderRadius: "6px" }}>
+                  <strong style={{ color: "#ffb600" }}>⚠ Timeout (60s)</strong>: Simulates browser scrape hanging. Crap out at 60s, job marked as completed with status <strong style={{ color: "#fff" }}>skipped</strong> and reason <strong style={{ color: "#ffb600" }}>Timeout</strong>.
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.75rem", borderRadius: "6px" }}>
+                  <strong style={{ color: "#ff4566" }}>⚠ Large Account (&gt;500)</strong>: Returns profile data showing 1248 posts. Immediately skips and logs, return value reason is set to <strong style={{ color: "#ff4566" }}>Large Account</strong>.
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.75rem", borderRadius: "6px" }}>
+                  <strong style={{ color: "#ffb600" }}>⚠ Private Account</strong>: Navigates to a private page. Skips and sets status to skipped with reason <strong style={{ color: "#ffb600" }}>Private Account</strong>.
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.02)", padding: "0.75rem", borderRadius: "6px" }}>
+                  <strong style={{ color: "#ef4444" }}>✗ Failure Retry Strategy</strong>: Throws connection error. BullMQ retries once more (Attempt 1 - Fail, Attempt 2 - Fail) then marks job state as <strong style={{ color: "#ef4444" }}>failed</strong> with reason <strong style={{ color: "#ef4444" }}>Scrape Error</strong>.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       )}
 
       {activeTab === "crm" && (

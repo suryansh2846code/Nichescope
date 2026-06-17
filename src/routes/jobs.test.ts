@@ -94,6 +94,26 @@ describe("Jobs Queue API Endpoints", () => {
     expect(data[1].state).toBe("completed");
   });
 
+  test("GET /jobs/stats retrieves aggregate queue counts", async () => {
+    discoveryQueue.getWaitingCount = async () => 2;
+    discoveryQueue.getActiveCount = async () => 1;
+    discoveryQueue.getCompletedCount = async () => 10;
+    discoveryQueue.getFailedCount = async () => 1;
+
+    scrapeQueue.getWaitingCount = async () => 3;
+    scrapeQueue.getActiveCount = async () => 2;
+    scrapeQueue.getCompletedCount = async () => 20;
+    scrapeQueue.getFailedCount = async () => 2;
+
+    const { status, data } = await runRouteHandler(1, "GET");
+
+    expect(status).toBe(200);
+    expect(data.waiting).toBe(5);
+    expect(data.active).toBe(3);
+    expect(data.completed).toBe(30);
+    expect(data.failed).toBe(3);
+  });
+
   test("GET /jobs/:id retrieves specific job deep-dive details", async () => {
     const mockJob = {
       id: "discover-france-123456",
@@ -111,10 +131,10 @@ describe("Jobs Queue API Endpoints", () => {
 
     discoveryQueue.getJob = async (id) => {
       if (id === "discover-france-123456") return mockJob as any;
-      return null;
+      return undefined;
     };
 
-    const { status, data } = await runRouteHandler(1, "GET", {}, {}, { id: "discover-france-123456" });
+    const { status, data } = await runRouteHandler(2, "GET", {}, {}, { id: "discover-france-123456" });
 
     expect(status).toBe(200);
     expect(data.id).toBe("discover-france-123456");
@@ -124,10 +144,10 @@ describe("Jobs Queue API Endpoints", () => {
   });
 
   test("GET /jobs/:id returns 404 if job not found", async () => {
-    discoveryQueue.getJob = async () => null;
-    scrapeQueue.getJob = async () => null;
+    discoveryQueue.getJob = async () => undefined;
+    scrapeQueue.getJob = async () => undefined;
 
-    const { status, data } = await runRouteHandler(1, "GET", {}, {}, { id: "nonexistent-job-id" });
+    const { status, data } = await runRouteHandler(2, "GET", {}, {}, { id: "nonexistent-job-id" });
 
     expect(status).toBe(404);
     expect(data.error).toBe("Job not found");

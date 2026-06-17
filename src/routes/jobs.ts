@@ -47,6 +47,33 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+router.get("/stats", async (req, res, next) => {
+  try {
+    const [
+      discWaiting, discActive, discCompleted, discFailed,
+      scrapeWaiting, scrapeActive, scrapeCompleted, scrapeFailed
+    ] = await Promise.all([
+      discoveryQueue.getWaitingCount(),
+      discoveryQueue.getActiveCount(),
+      discoveryQueue.getCompletedCount(),
+      discoveryQueue.getFailedCount(),
+      scrapeQueue.getWaitingCount(),
+      scrapeQueue.getActiveCount(),
+      scrapeQueue.getCompletedCount(),
+      scrapeQueue.getFailedCount()
+    ]);
+
+    res.json({
+      waiting: discWaiting + scrapeWaiting,
+      active: discActive + scrapeActive,
+      completed: discCompleted + scrapeCompleted,
+      failed: discFailed + scrapeFailed
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;

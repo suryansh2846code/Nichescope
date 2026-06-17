@@ -4,6 +4,49 @@ import { discoveryQueue } from "../queues/discoveryQueue";
 
 const router = Router();
 
+router.get("/", async (req, res, next) => {
+  try {
+    const limit = 50;
+
+    const [discoveryJobs, scrapeJobs] = await Promise.all([
+      discoveryQueue.getJobs(["active", "waiting", "completed", "failed", "delayed", "paused"], 0, limit, false),
+      scrapeQueue.getJobs(["active", "waiting", "completed", "failed", "delayed", "paused"], 0, limit, false)
+    ]);
+
+    const formatJob = async (job: any, queueName: string) => {
+      let state = "unknown";
+      try {
+        state = await job.getState();
+      } catch (err) {
+        // getState can throw if job is deleted mid-flight
+      }
+      return {
+        id: job.id,
+        name: job.name,
+        queue: queueName,
+        state,
+        progress: job.progress,
+        data: job.data,
+        timestamp: job.timestamp,
+        failedReason: job.failedReason,
+        finishedOn: job.finishedOn,
+        processedOn: job.processedOn
+      };
+    };
+
+    const [formattedDiscovery, formattedScrape] = await Promise.all([
+      Promise.all(discoveryJobs.map(j => formatJob(j, "discovery"))),
+      Promise.all(scrapeJobs.map(j => formatJob(j, "scrape")))
+    ]);
+
+    const allJobs = [...formattedDiscovery, ...formattedScrape].sort((a, b) => b.timestamp - a.timestamp);
+
+    res.json(allJobs);
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;

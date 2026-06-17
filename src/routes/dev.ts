@@ -1,14 +1,24 @@
 import { Router } from "express";
 import { scrapeQueue } from "../queues/scrapeQueue";
 import { discoveryQueue } from "../queues/discoveryQueue";
+import { analysisQueue } from "../queues/analysisQueue";
+import { embeddingQueue } from "../queues/embeddingQueue";
+import { leadQualificationQueue } from "../queues/leadQualificationQueue";
+import { monitoringQueue } from "../queues/monitoringQueue";
+import { userIntelligenceQueue } from "../queues/userIntelligenceQueue";
 
 const router = Router();
 
 router.post("/clear-queues", async (req, res, next) => {
   try {
     await Promise.all([
-      scrapeQueue.drain(true),
-      discoveryQueue.drain(true)
+      scrapeQueue.obliterate({ force: true }),
+      discoveryQueue.obliterate({ force: true }),
+      analysisQueue.obliterate({ force: true }),
+      embeddingQueue.obliterate({ force: true }),
+      leadQualificationQueue.obliterate({ force: true }),
+      monitoringQueue.obliterate({ force: true }),
+      userIntelligenceQueue.obliterate({ force: true }),
     ]);
     res.json({ message: "Queues cleared successfully" });
   } catch (err) {

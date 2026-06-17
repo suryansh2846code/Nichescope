@@ -161,6 +161,7 @@ export default function App() {
   const [allJobs, setAllJobs] = useState<any[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsError, setJobsError] = useState<string | null>(null);
+  const [queueStats, setQueueStats] = useState<{ waiting: number; active: number; completed: number; failed: number } | null>(null);
 
   // Add to CRM Handler
   const handleAddToCrm = async (username: string) => {
@@ -283,6 +284,18 @@ export default function App() {
       setJobsError(err instanceof Error ? err.message : "Error loading jobs list");
     } finally {
       setJobsLoading(false);
+    }
+  }, []);
+
+  const fetchQueueStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/jobs/stats`);
+      if (res.ok) {
+        const stats = await res.json();
+        setQueueStats(stats);
+      }
+    } catch (err) {
+      console.error("Error fetching queue stats:", err);
     }
   }, []);
 
@@ -522,10 +535,15 @@ export default function App() {
     if (activeTab !== "hashtag-discovery") return;
 
     fetchAllJobs();
-    const intervalId = setInterval(fetchAllJobs, 3000);
+    fetchQueueStats();
+    const intervalStatsId = setInterval(fetchQueueStats, 2000);
+    const intervalJobsId = setInterval(fetchAllJobs, 3000);
 
-    return () => clearInterval(intervalId);
-  }, [activeTab, fetchAllJobs]);
+    return () => {
+      clearInterval(intervalStatsId);
+      clearInterval(intervalJobsId);
+    };
+  }, [activeTab, fetchAllJobs, fetchQueueStats]);
 
   // Poll job status
   useEffect(() => {
@@ -1063,27 +1081,28 @@ export default function App() {
               <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #ffb600" }}>
                 <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Waiting</div>
                 <div style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#ffb600" }}>
-                  {allJobs.filter(j => j.state === "waiting" || j.state === "delayed").length}
+                  {queueStats ? queueStats.waiting : 0}
                 </div>
               </div>
               <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #00baff" }}>
                 <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Working (Active)</div>
                 <div style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#00baff" }}>
-                  {allJobs.filter(j => j.state === "active").length}
+                  {queueStats ? queueStats.active : 0}
                 </div>
               </div>
               <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #22c55e" }}>
                 <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Completed</div>
                 <div style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#22c55e" }}>
-                  {allJobs.filter(j => j.state === "completed").length}
+                  {queueStats ? queueStats.completed : 0}
                 </div>
               </div>
               <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #ff4566" }}>
                 <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Failed</div>
                 <div style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#ff4566" }}>
-                  {allJobs.filter(j => j.state === "failed").length}
+                  {queueStats ? queueStats.failed : 0}
                 </div>
               </div>
+
             </div>
 
             {jobsLoading && allJobs.length === 0 ? (

@@ -100,7 +100,7 @@ const worker = new Worker<ScrapeJobData>(
   },
   {
     connection: createRedisConnectionOptions(),
-    concurrency: 1,
+    concurrency: 5,
   },
 );
 

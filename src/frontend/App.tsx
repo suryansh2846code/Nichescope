@@ -97,7 +97,7 @@ interface LeadPipelineResult {
 
 export default function App() {
   // Navigation
-  const [activeTab, setActiveTab] = useState<"discovery" | "qualified" | "crm" | "settings">("discovery");
+  const [activeTab, setActiveTab] = useState<"discovery" | "hashtag-discovery" | "qualified" | "crm" | "settings">("discovery");
 
   // Lead Inbox Tab State
   const [qualifiedLeads, setQualifiedLeads] = useState<any[]>([]);
@@ -153,12 +153,14 @@ export default function App() {
   const [submittingHashtag, setSubmittingHashtag] = useState(false);
   const [hashtagError, setHashtagError] = useState<string | null>(null);
   const [discoveredUsers, setDiscoveredUsers] = useState<any[]>([]);
-  const [discoveryTabMode, setDiscoveryTabMode] = useState<"semantic" | "keyword">("semantic");
 
   // Job Tracker State
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
+  const [allJobs, setAllJobs] = useState<any[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsError, setJobsError] = useState<string | null>(null);
 
   // Add to CRM Handler
   const handleAddToCrm = async (username: string) => {
@@ -266,6 +268,23 @@ export default function App() {
       setSubmittingHashtag(false);
     }
   };
+
+  const fetchAllJobs = useCallback(async () => {
+    setJobsLoading(true);
+    setJobsError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/jobs`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch jobs pipeline");
+      }
+      const data = await res.json();
+      setAllJobs(data);
+    } catch (err) {
+      setJobsError(err instanceof Error ? err.message : "Error loading jobs list");
+    } finally {
+      setJobsLoading(false);
+    }
+  }, []);
 
   // Fetch Monitoring Telemetry Data
   const fetchMonitoringData = useCallback(async () => {
@@ -499,6 +518,15 @@ export default function App() {
     }
   }, [activeTab, fetchMonitoringData]);
 
+  useEffect(() => {
+    if (activeTab !== "hashtag-discovery") return;
+
+    fetchAllJobs();
+    const intervalId = setInterval(fetchAllJobs, 3000);
+
+    return () => clearInterval(intervalId);
+  }, [activeTab, fetchAllJobs]);
+
   // Poll job status
   useEffect(() => {
     if (!activeJobId) return;
@@ -700,7 +728,13 @@ export default function App() {
           className={`tab-btn ${activeTab === "discovery" ? "active" : ""}`}
           onClick={() => setActiveTab("discovery")}
         >
-          🔍 Lead Discovery
+          🔍 Semantic Search
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "hashtag-discovery" ? "active" : ""}`}
+          onClick={() => setActiveTab("hashtag-discovery")}
+        >
+          🏷️ Hashtag Discovery
         </button>
         <button
           className={`tab-btn ${activeTab === "qualified" ? "active" : ""}`}
@@ -804,87 +838,200 @@ export default function App() {
             </div>
           </div>
 
-          {/* Mode Tabs */}
-          <div className="tab-navigation" style={{ marginBottom: "1.5rem", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
-            <button
-              className={`tab-btn ${discoveryTabMode === "semantic" ? "active" : ""}`}
-              onClick={() => setDiscoveryTabMode("semantic")}
-              style={{ background: "none", border: "none", color: discoveryTabMode === "semantic" ? "var(--color-accent)" : "var(--color-text-dim)" }}
-            >
-              🌌 Semantic Search Results
-            </button>
-            <button
-              className={`tab-btn ${discoveryTabMode === "keyword" ? "active" : ""}`}
-              onClick={() => setDiscoveryTabMode("keyword")}
-              style={{ background: "none", border: "none", color: discoveryTabMode === "keyword" ? "var(--color-accent)" : "var(--color-text-dim)" }}
-            >
-              🏷️ Hashtag / Keyword Discovery
-            </button>
+          <div className="glass-card card-table animate-fade-in" style={{ minHeight: "300px" }}>
+            <h2 className="card-title">Results Matching query: {searchQuery || "All"}</h2>
+            {searchLoading && (
+              <div style={{ textAlign: "center", padding: "3rem" }}>
+                <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
+                <p style={{ color: "var(--color-text-dim)" }}>Matching vector embeddings...</p>
+              </div>
+            )}
+            {searchError && <div className="toast toast-error">{searchError}</div>}
+            {!searchLoading && !searchError && searchResults.length === 0 && (
+              <div className="empty-state" style={{ padding: "4rem 0" }}>
+                <div className="empty-state-icon">📭</div>
+                <h3>No Results Found</h3>
+                <p>Submit a query in the search bar above to query vector space.</p>
+              </div>
+            )}
+            {!searchLoading && !searchError && searchResults.length > 0 && (
+              <div className="table-responsive">
+                <table className="leads-table">
+                  <thead>
+                    <tr>
+                      <th>Username</th>
+                      <th>Problem Area</th>
+                      <th>Service Needed</th>
+                      <th>Rec. Action</th>
+                      <th>Buying Intent</th>
+                      <th>Similarity Score</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {searchResults.map((result, idx) => {
+                      const inCrm = crmLeads.some(cl => cl.username.toLowerCase() === result.username.toLowerCase());
+                      return (
+                        <tr key={idx} className="lead-row">
+                          <td>
+                            <a href={`https://instagram.com/${result.username}`} target="_blank" rel="noopener noreferrer" style={{ fontWeight: "bold" }}>
+                              @{result.username}
+                            </a>
+                          </td>
+                          <td>{result.problem}</td>
+                          <td>{result.serviceNeeded}</td>
+                          <td>
+                            <span style={{
+                              color: result.recommendedAction === "Contact immediately" ? "#ff4566" : "var(--color-accent)",
+                              fontWeight: "bold"
+                            }}>
+                              {result.recommendedAction}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{ fontWeight: "bold" }}>{result.buyingIntent}%</span>
+                          </td>
+                          <td>
+                            {(result.similarityScore * 100).toFixed(1)}%
+                          </td>
+                          <td>
+                            {inCrm ? (
+                              <span style={{ color: "var(--color-success)", fontWeight: "bold", fontSize: "0.85rem" }}>✅ In CRM</span>
+                            ) : (
+                              <button
+                                onClick={() => handleAddToCrm(result.username)}
+                                className="btn btn-primary"
+                                style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
+                              >
+                                Add to CRM
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
+        </div>
+      )}
 
-          {discoveryTabMode === "semantic" && (
-            <div className="glass-card card-table animate-fade-in" style={{ minHeight: "300px" }}>
-              <h2 className="card-title">Results Matching query: {searchQuery || "All"}</h2>
-              {searchLoading && (
-                <div style={{ textAlign: "center", padding: "3rem" }}>
-                  <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
-                  <p style={{ color: "var(--color-text-dim)" }}>Matching vector embeddings...</p>
+      {activeTab === "hashtag-discovery" && (
+        <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "2rem", alignItems: "start" }}>
+            {/* Keyword control form */}
+            <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+              <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>🏷️ Trigger Hashtag Scraper Pipeline</h3>
+              <form onSubmit={handleHashtagDiscoverySubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div className="input-group" style={{ margin: 0 }}>
+                  <label>Hashtag Target (use comma or # to separate multiple)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. skincare, crossfit, #wellness"
+                    value={hashtagInput}
+                    onChange={(e) => setHashtagInput(e.target.value)}
+                    className="input-field"
+                    style={{
+                      background: "rgba(255, 255, 255, 0.03)",
+                      border: "var(--glass-border)",
+                      borderRadius: "8px",
+                      color: "#fff",
+                      padding: "0.75rem",
+                      outline: "none"
+                    }}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={submittingHashtag || !!activeJobId}
+                >
+                  {submittingHashtag ? "Triggering..." : "Launch Keyword Scraper"}
+                </button>
+              </form>
+              {hashtagError && <div className="toast toast-error">{hashtagError}</div>}
+
+              {/* Job tracker if active */}
+              {(activeJobId || job || jobError) && (
+                <div className="glass-card" style={{ padding: "1rem", marginTop: "1rem", background: "rgba(0,0,0,0.2)" }}>
+                  <h4 style={{ color: "#fff", fontSize: "0.9rem", marginBottom: "0.5rem" }}>⚙️ Active Scrape Job</h4>
+                  {jobError && <div style={{ color: "var(--color-error)", fontSize: "0.8rem" }}>Error: {jobError}</div>}
+                  {activeJobId && !job && <p style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>Starting job queue...</p>}
+                  {job && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", fontSize: "0.8rem" }}>
+                      <div>Status: <span style={{ color: "var(--color-accent)" }}>{job.state.toUpperCase()}</span></div>
+                      {typeof job.progress === "object" && job.progress !== null ? (
+                        <>
+                          <div>Progress: {job.progress.percent}%</div>
+                          <div style={{ width: "100%", height: "6px", background: "rgba(255,255,255,0.1)", borderRadius: "3px", overflow: "hidden" }}>
+                            <div style={{ width: `${job.progress.percent}%`, height: "100%", background: "var(--color-primary)", transition: "width 0.3s ease" }}></div>
+                          </div>
+                          {job.progress.currentKeyword && (
+                            <div style={{ color: "var(--color-text-dim)", marginTop: "0.25rem" }}>
+                              🏷️ Keyword: <strong style={{ color: "#fff" }}>#{job.progress.currentKeyword}</strong>
+                            </div>
+                          )}
+                          {job.progress.currentUsername && (
+                            <div style={{ color: "var(--color-accent)", marginTop: "0.25rem", display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                              <div className="spinner" style={{ width: "12px", height: "12px", borderWidth: "1.5px" }}></div>
+                              <span>Processing: <strong>@{job.progress.currentUsername}</strong> ({job.progress.currentIndex}/{job.progress.totalCount})</span>
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: "1rem", marginTop: "0.25rem" }}>
+                            <span style={{ color: "#4ade80", fontWeight: "500" }}>✓ Added: {job.progress.added}</span>
+                            <span style={{ color: "var(--color-text-dim)" }}>⤳ Skipped: {job.progress.skipped}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div>Progress: {job.progress}%</div>
+                          <div style={{ width: "100%", height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
+                            <div style={{ width: `${job.progress}%`, height: "100%", background: "var(--color-primary)", transition: "width 0.3s ease" }}></div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
-              {searchError && <div className="toast toast-error">{searchError}</div>}
-              {!searchLoading && !searchError && searchResults.length === 0 && (
-                <div className="empty-state" style={{ padding: "4rem 0" }}>
-                  <div className="empty-state-icon">📭</div>
-                  <h3>No Results Found</h3>
-                  <p>Submit a query in the search bar above to query vector space.</p>
+            </div>
+
+            {/* Keyword Discovered users */}
+            <div className="glass-card card-table">
+              <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>Discovered Accounts via #{activeDiscoveryKeyword || "None"}</h3>
+              {discoveredUsers.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "3rem", color: "var(--color-text-dim)" }}>
+                  No users discovered from the active session yet. Run the scraper to pull accounts.
                 </div>
-              )}
-              {!searchLoading && !searchError && searchResults.length > 0 && (
+              ) : (
                 <div className="table-responsive">
                   <table className="leads-table">
                     <thead>
                       <tr>
                         <th>Username</th>
-                        <th>Problem Area</th>
+                        <th>Core Problem</th>
                         <th>Service Needed</th>
-                        <th>Rec. Action</th>
-                        <th>Buying Intent</th>
-                        <th>Similarity Score</th>
+                        <th>Intent Score</th>
                         <th>Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {searchResults.map((result, idx) => {
-                        const inCrm = crmLeads.some(cl => cl.username.toLowerCase() === result.username.toLowerCase());
+                      {discoveredUsers.map((u, idx) => {
+                        const inCrm = crmLeads.some(cl => cl.username.toLowerCase() === u.username.toLowerCase());
                         return (
                           <tr key={idx} className="lead-row">
-                            <td>
-                              <a href={`https://instagram.com/${result.username}`} target="_blank" rel="noopener noreferrer" style={{ fontWeight: "bold" }}>
-                                @{result.username}
-                              </a>
-                            </td>
-                            <td>{result.problem}</td>
-                            <td>{result.serviceNeeded}</td>
-                            <td>
-                              <span style={{
-                                color: result.recommendedAction === "Contact immediately" ? "#ff4566" : "var(--color-accent)",
-                                fontWeight: "bold"
-                              }}>
-                                {result.recommendedAction}
-                              </span>
-                            </td>
-                            <td>
-                              <span style={{ fontWeight: "bold" }}>{result.buyingIntent}%</span>
-                            </td>
-                            <td>
-                              {(result.similarityScore * 100).toFixed(1)}%
-                            </td>
+                            <td style={{ fontWeight: "bold" }}>@{u.username}</td>
+                            <td>{u.problem}</td>
+                            <td>{u.serviceNeeded}</td>
+                            <td>{u.buyingIntent}%</td>
                             <td>
                               {inCrm ? (
                                 <span style={{ color: "var(--color-success)", fontWeight: "bold", fontSize: "0.85rem" }}>✅ In CRM</span>
                               ) : (
                                 <button
-                                  onClick={() => handleAddToCrm(result.username)}
+                                  onClick={() => handleAddToCrm(u.username)}
                                   className="btn btn-primary"
                                   style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
                                 >
@@ -900,138 +1047,132 @@ export default function App() {
                 </div>
               )}
             </div>
-          )}
+          </div>
 
-          {discoveryTabMode === "keyword" && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "2rem", alignItems: "start" }}>
-              {/* Keyword control form */}
-              <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>🏷️ Trigger Hashtag Pipeline</h3>
-                <form onSubmit={handleHashtagDiscoverySubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                  <div className="input-group" style={{ margin: 0 }}>
-                    <label>Hashtag Target</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. skincare, crossfit"
-                      value={hashtagInput}
-                      onChange={(e) => setHashtagInput(e.target.value)}
-                      className="input-field"
-                      style={{
-                        background: "rgba(255, 255, 255, 0.03)",
-                        border: "var(--glass-border)",
-                        borderRadius: "8px",
-                        color: "#fff",
-                        padding: "0.75rem",
-                        outline: "none"
-                      }}
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    disabled={submittingHashtag || !!activeJobId}
-                  >
-                    {submittingHashtag ? "Triggering..." : "Launch Keyword Scraper"}
-                  </button>
-                </form>
-                {hashtagError && <div className="toast toast-error">{hashtagError}</div>}
-
-                {/* Job tracker if active */}
-                {(activeJobId || job || jobError) && (
-                  <div className="glass-card" style={{ padding: "1rem", marginTop: "1rem", background: "rgba(0,0,0,0.2)" }}>
-                    <h4 style={{ color: "#fff", fontSize: "0.9rem", marginBottom: "0.5rem" }}>⚙️ Discovery Job</h4>
-                    {jobError && <div style={{ color: "var(--color-error)", fontSize: "0.8rem" }}>Error: {jobError}</div>}
-                    {activeJobId && !job && <p style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>Starting job queue...</p>}
-                    {job && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", fontSize: "0.8rem" }}>
-                        <div>Status: <span style={{ color: "var(--color-accent)" }}>{job.state.toUpperCase()}</span></div>
-                        {typeof job.progress === "object" && job.progress !== null ? (
-                          <>
-                            <div>Progress: {job.progress.percent}%</div>
-                            <div style={{ width: "100%", height: "6px", background: "rgba(255,255,255,0.1)", borderRadius: "3px", overflow: "hidden" }}>
-                              <div style={{ width: `${job.progress.percent}%`, height: "100%", background: "var(--color-primary)", transition: "width 0.3s ease" }}></div>
-                            </div>
-                            {job.progress.currentKeyword && (
-                              <div style={{ color: "var(--color-text-dim)", marginTop: "0.25rem" }}>
-                                🏷️ Keyword: <strong style={{ color: "#fff" }}>#{job.progress.currentKeyword}</strong>
-                              </div>
-                            )}
-                            {job.progress.currentUsername && (
-                              <div style={{ color: "var(--color-accent)", marginTop: "0.25rem", display: "flex", alignItems: "center", gap: "0.25rem" }}>
-                                <div className="spinner" style={{ width: "12px", height: "12px", borderWidth: "1.5px" }}></div>
-                                <span>Processing: <strong>@{job.progress.currentUsername}</strong> ({job.progress.currentIndex}/{job.progress.totalCount})</span>
-                              </div>
-                            )}
-                            <div style={{ display: "flex", gap: "1rem", marginTop: "0.25rem" }}>
-                              <span style={{ color: "#4ade80", fontWeight: "500" }}>✓ Added: {job.progress.added}</span>
-                              <span style={{ color: "var(--color-text-dim)" }}>⤳ Skipped: {job.progress.skipped}</span>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div>Progress: {job.progress}%</div>
-                            <div style={{ width: "100%", height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden" }}>
-                              <div style={{ width: `${job.progress}%`, height: "100%", background: "var(--color-primary)", transition: "width 0.3s ease" }}></div>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
+          {/* Job Pipeline Status Monitor */}
+          <div className="glass-card card-table" style={{ marginTop: "2rem" }}>
+            <h3 className="card-title" style={{ fontSize: "1.3rem", margin: 0, marginBottom: "1rem" }}>⚙️ Jobs Pipeline Monitor</h3>
+            
+            {/* Summary counters grid */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: "1rem",
+              marginBottom: "1.5rem"
+            }}>
+              <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #ffb600" }}>
+                <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Waiting</div>
+                <div style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#ffb600" }}>
+                  {allJobs.filter(j => j.state === "waiting" || j.state === "delayed").length}
+                </div>
               </div>
-
-              {/* Keyword Discovered users */}
-              <div className="glass-card card-table">
-                <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>Discovered Accounts via #{activeDiscoveryKeyword || "None"}</h3>
-                {discoveredUsers.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "3rem", color: "var(--color-text-dim)" }}>
-                    No users discovered from the active session yet. Run the scraper to pull accounts.
-                  </div>
-                ) : (
-                  <div className="table-responsive">
-                    <table className="leads-table">
-                      <thead>
-                        <tr>
-                          <th>Username</th>
-                          <th>Core Problem</th>
-                          <th>Service Needed</th>
-                          <th>Intent Score</th>
-                          <th>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {discoveredUsers.map((u, idx) => {
-                          const inCrm = crmLeads.some(cl => cl.username.toLowerCase() === u.username.toLowerCase());
-                          return (
-                            <tr key={idx} className="lead-row">
-                              <td style={{ fontWeight: "bold" }}>@{u.username}</td>
-                              <td>{u.problem}</td>
-                              <td>{u.serviceNeeded}</td>
-                              <td>{u.buyingIntent}%</td>
-                              <td>
-                                {inCrm ? (
-                                  <span style={{ color: "var(--color-success)", fontWeight: "bold", fontSize: "0.85rem" }}>✅ In CRM</span>
-                                ) : (
-                                  <button
-                                    onClick={() => handleAddToCrm(u.username)}
-                                    className="btn btn-primary"
-                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
-                                  >
-                                    Add to CRM
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+              <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #00baff" }}>
+                <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Working (Active)</div>
+                <div style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#00baff" }}>
+                  {allJobs.filter(j => j.state === "active").length}
+                </div>
+              </div>
+              <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #22c55e" }}>
+                <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Completed</div>
+                <div style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#22c55e" }}>
+                  {allJobs.filter(j => j.state === "completed").length}
+                </div>
+              </div>
+              <div className="glass-card" style={{ padding: "1rem", textAlign: "center", borderTop: "3px solid #ff4566" }}>
+                <div style={{ color: "var(--color-text-dim)", fontSize: "0.75rem", textTransform: "uppercase" }}>Failed</div>
+                <div style={{ fontSize: "1.6rem", fontWeight: "bold", color: "#ff4566" }}>
+                  {allJobs.filter(j => j.state === "failed").length}
+                </div>
               </div>
             </div>
-          )}
+
+            {jobsLoading && allJobs.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "2rem" }}>
+                <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
+                <p style={{ color: "var(--color-text-dim)" }}>Loading jobs pipeline...</p>
+              </div>
+            ) : jobsError ? (
+              <div className="toast toast-error">{jobsError}</div>
+            ) : allJobs.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "2rem", color: "var(--color-text-dim)" }}>
+                No discovery or scrape jobs have been triggered in this deployment session.
+              </div>
+            ) : (
+              <div className="table-responsive" style={{ maxHeight: "450px", overflowY: "auto" }}>
+                <table className="leads-table">
+                  <thead>
+                    <tr>
+                      <th>Job ID</th>
+                      <th>Type / Queue</th>
+                      <th>Target</th>
+                      <th>Status</th>
+                      <th>Progress</th>
+                      <th>Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allJobs.map((j) => {
+                      const getStatusBadge = (state: string) => {
+                        const s = state.toLowerCase();
+                        if (s === "completed") return <span className="status-badge status-completed">Completed</span>;
+                        if (s === "active") return <span className="status-badge status-active" style={{ background: "#00baff20", color: "#00baff", borderColor: "#00baff" }}>Working</span>;
+                        if (s === "waiting") return <span className="status-badge status-delayed" style={{ background: "#ffb60020", color: "#ffb600", borderColor: "#ffb600" }}>Waiting</span>;
+                        if (s === "delayed") return <span className="status-badge status-delayed">Delayed</span>;
+                        if (s === "failed") return <span className="status-badge status-failed">Failed</span>;
+                        return <span className="status-badge">{state.toUpperCase()}</span>;
+                      };
+
+                      const getTargetValue = () => {
+                        if (j.queue === "discovery") return `#${j.data?.hashtag || "unknown"}`;
+                        return `@${j.data?.username || "unknown"}`;
+                      };
+
+                      const formatProgress = () => {
+                        if (j.state === "completed") return "100%";
+                        if (j.state === "failed") return "Failed";
+                        if (typeof j.progress === "object" && j.progress !== null) {
+                          return `${j.progress.percent || 0}%`;
+                        }
+                        if (typeof j.progress === "number") {
+                          return `${j.progress}%`;
+                        }
+                        return "0%";
+                      };
+
+                      return (
+                        <tr key={j.id} className="lead-row">
+                          <td style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>{j.id}</td>
+                          <td style={{ textTransform: "capitalize", fontWeight: "bold" }}>{j.queue}</td>
+                          <td>
+                            <strong style={{ color: "#fff" }}>{getTargetValue()}</strong>
+                          </td>
+                          <td>{getStatusBadge(j.state)}</td>
+                          <td>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                              <span style={{ fontSize: "0.8rem", width: "35px" }}>{formatProgress()}</span>
+                              {j.state === "active" && (
+                                <div style={{ flex: 1, height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden", minWidth: "60px" }}>
+                                  <div style={{
+                                    width: formatProgress(),
+                                    height: "100%",
+                                    background: "var(--color-primary)",
+                                    transition: "width 0.3s ease"
+                                  }}></div>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>
+                            {new Date(j.timestamp).toLocaleTimeString()}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

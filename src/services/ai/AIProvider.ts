@@ -54,7 +54,7 @@ export function getAIProvider(): AIProvider {
   }
 
   if (provider.toLowerCase() === "openrouter" && openrouterKey) {
-    return new OpenAIProvider(openrouterKey, "https://openrouter.ai/api/v1/chat/completions", "meta-llama/llama-3-8b-instruct:free");
+    return new OpenAIProvider(openrouterKey, "https://openrouter.ai/api/v1/chat/completions", "meta-llama/llama-3-8b-instruct");
   }
 
   throw new Error(

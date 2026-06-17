@@ -23,6 +23,7 @@ interface Job {
   state: "waiting" | "active" | "completed" | "failed" | "delayed" | "unknown";
   progress: number | {
     percent: number;
+    stage?: string;
     currentKeyword?: string;
     currentUsername?: string;
     currentIndex?: number;
@@ -38,6 +39,7 @@ interface Job {
   attemptsMade: number;
   failedReason?: string;
   returnvalue?: any;
+  processedOn?: number;
 }
 
 interface UserIntelligenceResult {

@@ -36,9 +36,11 @@ interface ScrapeProfileOptions {
   headless?: boolean;
   timeoutMs?: number;
   maxPosts?: number;
+  onStep?: (step: number) => void;
 }
 
 const INSTAGRAM_BASE_URL = "https://www.instagram.com";
+export const MAX_POSTS_PER_PROFILE = 12;
 
 export function parseInstagramCount(value: string): number {
   const normalized = value.replace(/,/g, "").trim().toLowerCase();
@@ -192,8 +194,10 @@ export async function extractProfileData(
 
 export async function extractPosts(
   page: any,
-  maxPosts: number = 15
+  maxPosts: number = 15,
+  onStep?: (step: number) => void
 ): Promise<ScrapedPost[]> {
+  if (onStep) onStep(3); // Collecting post urls
   // Grab initial links
   let postUrls = await page.evaluate(() => {
     const anchors = Array.from(document.querySelectorAll('a'));
@@ -223,6 +227,7 @@ export async function extractPosts(
 
   const targetUrls = postUrls.slice(0, maxPosts);
   console.log(`Extracting details for ${targetUrls.length} posts...`);
+  if (onStep && targetUrls.length > 0) onStep(4); // Visiting posts
 
   const scrapedPosts: ScrapedPost[] = [];
   for (const url of targetUrls) {
@@ -292,14 +297,18 @@ export async function scrapeProfile(
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     });
 
+    if (options.onStep) options.onStep(1); // Opening profile
     console.log(`Navigating to profile: ${profileUrl}`);
     await page.goto(profileUrl, {
       waitUntil: "networkidle",
       timeout: options.timeoutMs ?? 30_000,
     });
 
+    if (options.onStep) options.onStep(2); // Extracting profile
     const profile = await extractProfileData(page, cleanUsername);
-    const posts = await extractPosts(page, options.maxPosts ?? 15);
+    console.log(`Found ${profile.postCount} posts`);
+    console.log(`Limiting scrape to latest ${MAX_POSTS_PER_PROFILE} posts`);
+    const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep);
 
     return {
       profile,

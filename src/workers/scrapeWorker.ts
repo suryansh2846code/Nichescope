@@ -21,27 +21,38 @@ const worker = new Worker<ScrapeJobData>(
   async (job) => {
     const username = job.data.username.replace(/^@/, "").trim();
     console.log(`Starting scrape job ${job.id} for @${username}`);
-    await job.updateProgress(10);
-
     try {
       // scrapeProfile returns both profile and posts
       const { profile, posts } = await scrapeProfile(username, {
-        onStep: (step) => {
-          if (step === 1) console.log("STEP 1: Opening profile");
-          if (step === 2) console.log("STEP 2: Extracting profile");
-          if (step === 3) console.log("STEP 3: Collecting post urls");
-          if (step === 4) console.log("STEP 4: Visiting posts");
+        onStep: async (step) => {
+          if (step === 1) {
+            console.log("STEP 1: Opening profile");
+            await job.updateProgress({ percent: 10, stage: "Opening Profile" });
+          }
+          if (step === 3) {
+            console.log("STEP 3: Collecting post urls");
+            await job.updateProgress({ percent: 25, stage: "Loading Posts" });
+          }
+          if (step === 2) {
+            console.log("STEP 2: Extracting profile");
+            await job.updateProgress({ percent: 40, stage: "Extracting Profile" });
+          }
+          if (step === 4) {
+            console.log("STEP 4: Visiting posts");
+            await job.updateProgress({ percent: 60, stage: "Scraping Posts" });
+          }
         }
       });
-      await job.updateProgress(50);
+
+      await job.updateProgress({ percent: 80, stage: "Saving Data" });
 
       console.log("STEP 5: Saving profile");
       await saveOrUpdateScrapedProfile(job.data.niche, profile);
-      await job.updateProgress(75);
 
       console.log("STEP 6: Saving posts");
       await saveOrUpdatePosts(username, posts);
-      await job.updateProgress(100);
+
+      await job.updateProgress({ percent: 100, stage: "Completed" });
 
       console.log("STEP 7: Finished");
       console.log(`Finished scrape job ${job.id} for @${username}`);

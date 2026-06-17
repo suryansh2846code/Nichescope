@@ -368,9 +368,13 @@ export async function scrapeProfile(
     }
   }
 
+  const startTime = Date.now();
+  console.log(`[TIMEOUT GUARD START] @${cleanUsername}`);
+
   let timeoutId: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
+      console.log(`[TIMEOUT HIT] @${cleanUsername}\nElapsed: ${Date.now() - startTime}ms`);
       reject(new Error("TIMEOUT"));
     }, PROFILE_TIMEOUT_MS);
   });
@@ -420,6 +424,7 @@ export async function scrapeProfile(
         console.log(`Limiting scrape to latest ${MAX_POSTS_PER_PROFILE} posts`);
         const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep);
 
+        console.log(`[SCRAPE FINISHED] @${cleanUsername}\nElapsed: ${Date.now() - startTime}ms`);
         return {
           profile,
           posts,

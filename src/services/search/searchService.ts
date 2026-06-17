@@ -1,8 +1,8 @@
-import { Post } from "../../models/Post";
-import { PostAnalysis } from "../../models/PostAnalysis";
-import { UserIntelligence } from "../../models/UserIntelligence";
-import { PostEmbedding } from "../../models/PostEmbedding";
-import { getEmbeddingProvider } from "../ai/EmbeddingProvider";
+import { Post } from "../../models/Post.js";
+import { PostAnalysis } from "../../models/PostAnalysis.js";
+import { UserIntelligence } from "../../models/UserIntelligence.js";
+import { PostEmbedding } from "../../models/PostEmbedding.js";
+import { getEmbeddingProvider } from "../ai/EmbeddingProvider.js";
 
 // In-memory cache for query embeddings to optimize repeat searches
 export const queryCache = new Map<string, number[]>();
@@ -21,15 +21,15 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   let normB = 0;
 
   for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i]! * b[i]!;
-    normA += a[i]! * a[i]!;
-    normB += b[i]! * b[i]!;
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
   }
 
   if (normA === 0 || normB === 0) return 0;
-  
+
   const similarity = dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-  
+
   // Clamp to 0.0 - 1.0 range
   return Math.max(0.0, Math.min(1.0, similarity));
 }
@@ -56,7 +56,7 @@ export async function searchSemanticPosts(query: string, limit = 50): Promise<Se
   }
 
   const normalizedQuery = query.trim().toLowerCase();
-  
+
   // 1. Get query embedding (either from cache or generate new)
   let queryVector = queryCache.get(normalizedQuery);
   if (!queryVector) {

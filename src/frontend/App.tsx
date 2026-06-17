@@ -1138,6 +1138,7 @@ export default function App() {
                       <th>Target</th>
                       <th>Status</th>
                       <th>Progress</th>
+                      <th>Reason</th>
                       <th>Timestamp</th>
                     </tr>
                   </thead>
@@ -1202,6 +1203,21 @@ export default function App() {
                                 <span style={{ fontSize: "0.75rem", color: "var(--color-accent)", fontWeight: "500" }}>{j.progress.stage}</span>
                               )}
                             </div>
+                          </td>
+                          <td>
+                            {(() => {
+                              if (j.state === "failed") {
+                                return <span style={{ color: "#ff4566", fontSize: "0.8rem", fontWeight: "500" }}>Scrape Error</span>;
+                              }
+                              if (j.state === "completed" && j.returnvalue && j.returnvalue.status === "skipped") {
+                                const r = j.returnvalue.reason;
+                                if (r === "Timeout") return <span style={{ color: "#ffb600", fontSize: "0.8rem", fontWeight: "500" }}>Timeout</span>;
+                                if (r === "SKIPPED_LARGE_ACCOUNT") return <span style={{ color: "#ff4566", fontSize: "0.8rem", fontWeight: "500" }}>Large Account</span>;
+                                if (r === "Private Account") return <span style={{ color: "#ffb600", fontSize: "0.8rem", fontWeight: "500" }}>Private Account</span>;
+                                return <span style={{ color: "var(--color-text-dim)", fontSize: "0.8rem" }}>{r || "Skipped"}</span>;
+                              }
+                              return <span style={{ color: "var(--color-text-dim)", fontSize: "0.8rem" }}>—</span>;
+                            })()}
                           </td>
                           <td style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>
                             {new Date(j.timestamp).toLocaleTimeString()}

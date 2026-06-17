@@ -1,4 +1,4 @@
-import type { EmbeddingProvider } from "./EmbeddingProvider";
+import type { EmbeddingProvider } from "./EmbeddingProvider.js";
 
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private apiKey: string;

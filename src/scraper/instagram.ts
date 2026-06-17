@@ -44,14 +44,15 @@ const INSTAGRAM_BASE_URL = "https://www.instagram.com";
 export const MAX_POSTS_PER_PROFILE = 12;
 export const PROFILE_TIMEOUT_MS = 60000;
 
-async function safeCloseBrowser(browser: any) {
+async function safeClose(resource: any, name: string, timeoutMs: number = 2000) {
+  if (!resource) return;
   try {
     await Promise.race([
-      browser.close(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Browser close timeout")), 2000))
+      resource.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`${name} close timeout`)), timeoutMs))
     ]);
   } catch (err) {
-    console.error("Warning: browser close failed or timed out:", err instanceof Error ? err.message : String(err));
+    console.error(`Warning: ${name} close failed or timed out:`, err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -509,9 +510,9 @@ export async function scrapeProfile(
         }
       } finally {
         // Always clean up browser resources after each attempt
-        if (page)    { await page.close().catch(() => {}); page = null; }
-        if (context) { await context.close().catch(() => {}); context = null; }
-        if (browser) { await safeCloseBrowser(browser); browser = null; }
+        if (page)    { await safeClose(page, "page", 1000); page = null; }
+        if (context) { await safeClose(context, "context", 1000); context = null; }
+        if (browser) { await safeClose(browser, "browser", 2000); browser = null; }
       }
     }
 
@@ -525,9 +526,9 @@ export async function scrapeProfile(
     // Cancel hard timeout timer
     clearTimeout(timeoutId!);
     // Final safety net: close any lingering browser resources
-    if (page)    await page.close().catch(() => {});
-    if (context) await context.close().catch(() => {});
-    if (browser) await safeCloseBrowser(browser);
+    if (page)    await safeClose(page, "page", 1000);
+    if (context) await safeClose(context, "context", 1000);
+    if (browser) await safeClose(browser, "browser", 2000);
     console.log(`[GUARD CLEARED] @${cleanUsername} — total elapsed: ${elapsedStr()}`);
   }
 }
@@ -667,7 +668,7 @@ export async function scrapeHashtag(
       discoveries: uniqueDiscoveries,
     };
   } finally {
-    await safeCloseBrowser(browser);
+    await safeClose(browser, "browser", 2000);
   }
 }
 

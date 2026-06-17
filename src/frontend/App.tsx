@@ -1357,12 +1357,14 @@ export default function App() {
                               if (j.state === "failed") {
                                 return <span style={{ color: "#ff4566", fontSize: "0.8rem", fontWeight: "500" }}>Scrape Error</span>;
                               }
-                              if (j.state === "completed" && j.returnvalue && j.returnvalue.status === "skipped") {
-                                const r = j.returnvalue.reason;
-                                if (r === "Timeout") return <span style={{ color: "#ffb600", fontSize: "0.8rem", fontWeight: "500" }}>Timeout</span>;
+                              const rv = j.returnvalue;
+                              const rvStatus = rv?.status?.toUpperCase();
+                              if (j.state === "completed" && rv && rvStatus === "SKIPPED") {
+                                const r = (rv.reason || "").toUpperCase();
+                                if (r === "TIMEOUT") return <span style={{ color: "#ffb600", fontSize: "0.8rem", fontWeight: "500" }}>⏱ Timeout</span>;
                                 if (r === "SKIPPED_LARGE_ACCOUNT") return <span style={{ color: "#ff4566", fontSize: "0.8rem", fontWeight: "500" }}>Large Account</span>;
-                                if (r === "Private Account") return <span style={{ color: "#ffb600", fontSize: "0.8rem", fontWeight: "500" }}>Private Account</span>;
-                                return <span style={{ color: "var(--color-text-dim)", fontSize: "0.8rem" }}>{r || "Skipped"}</span>;
+                                if (r === "PRIVATE_ACCOUNT" || r === "PRIVATE ACCOUNT") return <span style={{ color: "#ffb600", fontSize: "0.8rem", fontWeight: "500" }}>Private Account</span>;
+                                return <span style={{ color: "var(--color-text-dim)", fontSize: "0.8rem" }}>{rv.reason || "Skipped"}</span>;
                               }
                               return <span style={{ color: "var(--color-text-dim)", fontSize: "0.8rem" }}>—</span>;
                             })()}
@@ -2226,12 +2228,14 @@ export default function App() {
                               <td>
                                 {(() => {
                                   if (j.state === "failed") return <span style={{ color: "#ff4566" }}>Scrape Error</span>;
-                                  if (j.state === "completed" && j.returnvalue && j.returnvalue.status === "skipped") {
-                                    const r = j.returnvalue.reason;
-                                    if (r === "Timeout") return <span style={{ color: "#ffb600" }}>Timeout</span>;
+                                  const rv = j.returnvalue;
+                                  const rvStatus = rv?.status?.toUpperCase();
+                                  if (j.state === "completed" && rv && rvStatus === "SKIPPED") {
+                                    const r = (rv.reason || "").toUpperCase();
+                                    if (r === "TIMEOUT") return <span style={{ color: "#ffb600" }}>⏱ Timeout</span>;
                                     if (r === "SKIPPED_LARGE_ACCOUNT") return <span style={{ color: "#ff4566" }}>Large Account</span>;
-                                    if (r === "Private Account") return <span style={{ color: "#ffb600" }}>Private Account</span>;
-                                    return <span style={{ color: "var(--color-text-dim)" }}>{r || "Skipped"}</span>;
+                                    if (r === "PRIVATE_ACCOUNT" || r === "PRIVATE ACCOUNT") return <span style={{ color: "#ffb600" }}>Private Account</span>;
+                                    return <span style={{ color: "var(--color-text-dim)" }}>{rv.reason || "Skipped"}</span>;
                                   }
                                   return <span style={{ color: "var(--color-text-dim)" }}>—</span>;
                                 })()}

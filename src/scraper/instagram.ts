@@ -368,86 +368,88 @@ export async function scrapeProfile(
     }
   }
 
-  let attempts = 0;
-  const maxAttempts = 2;
-  let lastError: any;
+  let timeoutId: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error("TIMEOUT"));
+    }, PROFILE_TIMEOUT_MS);
+  });
 
-  while (attempts < maxAttempts) {
-    attempts++;
-    console.log(`Starting profile scrape for @${cleanUsername} (Attempt ${attempts}/${maxAttempts})`);
+  const runScrape = async () => {
+    let attempts = 0;
+    const maxAttempts = 2;
+    let lastError: any;
 
-    const profileUrl = `${INSTAGRAM_BASE_URL}/${cleanUsername}/`;
-    const browser = await chromium.launch({
-      headless: options.headless ?? true,
-    });
+    while (attempts < maxAttempts) {
+      attempts++;
+      console.log(`Starting profile scrape for @${cleanUsername} (Attempt ${attempts}/${maxAttempts})`);
 
-    let timeoutId: any;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new Error("TIMEOUT"));
-      }, PROFILE_TIMEOUT_MS);
-    });
-
-    const scrapeAction = (async () => {
-      const page = await browser.newPage({
-        userAgent:
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      const profileUrl = `${INSTAGRAM_BASE_URL}/${cleanUsername}/`;
+      const browser = await chromium.launch({
+        headless: options.headless ?? true,
       });
 
-      if (options.onStep) options.onStep(1); // Opening profile
-      console.log(`Navigating to profile: ${profileUrl}`);
-      await page.goto(profileUrl, {
-        waitUntil: "networkidle",
-        timeout: options.timeoutMs ?? 30_000,
-      });
+      try {
+        const page = await browser.newPage({
+          userAgent:
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        });
 
-      if (options.onStep) options.onStep(2); // Extracting profile
-      const isPrivate = await page.evaluate(() => {
-        const bodyText = document.body.innerText;
-        return bodyText.includes("This Account is Private") || bodyText.includes("This account is private");
-      });
-      if (isPrivate) {
-        throw new Error("PRIVATE_ACCOUNT");
+        if (options.onStep) options.onStep(1); // Opening profile
+        console.log(`Navigating to profile: ${profileUrl}`);
+        await page.goto(profileUrl, {
+          waitUntil: "networkidle",
+          timeout: options.timeoutMs ?? 30_000,
+        });
+
+        if (options.onStep) options.onStep(2); // Extracting profile
+        const isPrivate = await page.evaluate(() => {
+          const bodyText = document.body.innerText;
+          return bodyText.includes("This Account is Private") || bodyText.includes("This account is private");
+        });
+        if (isPrivate) {
+          throw new Error("PRIVATE_ACCOUNT");
+        }
+
+        const profile = await extractProfileData(page, cleanUsername);
+        if (profile.postCount > 500) {
+          throw new Error(`SKIPPED_LARGE_ACCOUNT:${profile.postCount}`);
+        }
+
+        console.log(`Found ${profile.postCount} posts`);
+        console.log(`Limiting scrape to latest ${MAX_POSTS_PER_PROFILE} posts`);
+        const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep);
+
+        return {
+          profile,
+          posts,
+        };
+      } catch (err: any) {
+        lastError = err;
+        console.error(`Profile scrape attempt ${attempts} failed for @${cleanUsername}:`, err instanceof Error ? err.message : String(err));
+        
+        if (err.message === "PRIVATE_ACCOUNT" || err.message.startsWith("SKIPPED_LARGE_ACCOUNT:")) {
+          throw err;
+        }
+
+        if (attempts < maxAttempts) {
+          console.log(`Retrying profile scrape for @${cleanUsername} in 2 seconds...`);
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      } finally {
+        await safeCloseBrowser(browser);
       }
-
-      const profile = await extractProfileData(page, cleanUsername);
-      if (profile.postCount > 500) {
-        throw new Error(`SKIPPED_LARGE_ACCOUNT:${profile.postCount}`);
-      }
-
-      console.log(`Found ${profile.postCount} posts`);
-      console.log(`Limiting scrape to latest ${MAX_POSTS_PER_PROFILE} posts`);
-      const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep);
-
-      return {
-        profile,
-        posts,
-      };
-    })();
-
-    try {
-      const result = await Promise.race([scrapeAction, timeoutPromise]);
-      return result;
-    } catch (err: any) {
-      lastError = err;
-      console.error(`Profile scrape attempt ${attempts} failed for @${cleanUsername}:`, err instanceof Error ? err.message : String(err));
-      
-      // Do not retry private accounts or large accounts as they are skip rules
-      if (err.message === "PRIVATE_ACCOUNT" || err.message.startsWith("SKIPPED_LARGE_ACCOUNT:")) {
-        throw err;
-      }
-
-      if (attempts < maxAttempts) {
-        console.log(`Retrying profile scrape for @${cleanUsername} in 2 seconds...`);
-        await new Promise(r => setTimeout(r, 2000));
-      }
-    } finally {
-      clearTimeout(timeoutId);
-      await safeCloseBrowser(browser);
     }
-  }
 
-  throw lastError;
+    throw lastError;
+  };
+
+  try {
+    const result = await Promise.race([runScrape(), timeoutPromise]);
+    return result;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export interface DiscoveredUser {

@@ -41,6 +41,7 @@ interface ScrapeProfileOptions {
 
 const INSTAGRAM_BASE_URL = "https://www.instagram.com";
 export const MAX_POSTS_PER_PROFILE = 12;
+export const PROFILE_TIMEOUT_MS = 60000;
 
 export function parseInstagramCount(value: string): number {
   const normalized = value.replace(/,/g, "").trim().toLowerCase();
@@ -291,7 +292,14 @@ export async function scrapeProfile(
     headless: options.headless ?? true,
   });
 
-  try {
+  let timeoutId: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error("TIMEOUT"));
+    }, PROFILE_TIMEOUT_MS);
+  });
+
+  const scrapeAction = (async () => {
     const page = await browser.newPage({
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -314,7 +322,13 @@ export async function scrapeProfile(
       profile,
       posts,
     };
+  })();
+
+  try {
+    const result = await Promise.race([scrapeAction, timeoutPromise]);
+    return result;
   } finally {
+    clearTimeout(timeoutId);
     await browser.close();
   }
 }

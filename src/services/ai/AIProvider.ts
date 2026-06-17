@@ -46,7 +46,7 @@ export function getAIProvider(): AIProvider {
   const geminiKey = process.env.GEMINI_API_KEY || "";
 
   if (provider.toLowerCase() === "gemini" && geminiKey) {
-    return new GeminiProvider(geminiKey, "gemini-1.5-flash");
+    return new GeminiProvider(geminiKey, "gemini-2.5-flash");
   }
 
   if (provider.toLowerCase() === "openai" && openaiKey) {

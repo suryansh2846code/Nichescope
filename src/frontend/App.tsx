@@ -982,7 +982,14 @@ export default function App() {
                       <div>Status: <span style={{ color: "var(--color-accent)" }}>{job.state.toUpperCase()}</span></div>
                       {typeof job.progress === "object" && job.progress !== null ? (
                         <>
-                          <div>Progress: {job.progress.percent}%</div>
+                          <div>
+                            Progress: {job.progress.percent}%
+                            {job.progress.stage && (
+                              <span style={{ color: "var(--color-accent)", marginLeft: "0.5rem", fontWeight: "bold" }}>
+                                ({job.progress.stage})
+                              </span>
+                            )}
+                          </div>
                           <div style={{ width: "100%", height: "6px", background: "rgba(255,255,255,0.1)", borderRadius: "3px", overflow: "hidden" }}>
                             <div style={{ width: `${job.progress.percent}%`, height: "100%", background: "var(--color-primary)", transition: "width 0.3s ease" }}></div>
                           </div>
@@ -1167,17 +1174,22 @@ export default function App() {
                           </td>
                           <td>{getStatusBadge(j.state)}</td>
                           <td>
-                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                              <span style={{ fontSize: "0.8rem", width: "35px" }}>{formatProgress()}</span>
-                              {j.state === "active" && (
-                                <div style={{ flex: 1, height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden", minWidth: "60px" }}>
-                                  <div style={{
-                                    width: formatProgress(),
-                                    height: "100%",
-                                    background: "var(--color-primary)",
-                                    transition: "width 0.3s ease"
-                                  }}></div>
-                                </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                                <span style={{ fontSize: "0.8rem", width: "35px" }}>{formatProgress()}</span>
+                                {j.state === "active" && (
+                                  <div style={{ flex: 1, height: "4px", background: "rgba(255,255,255,0.1)", borderRadius: "2px", overflow: "hidden", minWidth: "60px" }}>
+                                    <div style={{
+                                      width: formatProgress(),
+                                      height: "100%",
+                                      background: "var(--color-primary)",
+                                      transition: "width 0.3s ease"
+                                    }}></div>
+                                  </div>
+                                )}
+                              </div>
+                              {j.state === "active" && typeof j.progress === "object" && j.progress !== null && j.progress.stage && (
+                                <span style={{ fontSize: "0.75rem", color: "var(--color-accent)", fontWeight: "500" }}>{j.progress.stage}</span>
                               )}
                             </div>
                           </td>

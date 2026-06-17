@@ -208,30 +208,43 @@ export async function extractProfileData(
 export async function extractPosts(
   page: any,
   maxPosts: number = 15,
-  onStep?: (step: number) => void
+  onStep?: (step: number) => void,
+  deadlineMs?: number  // absolute epoch ms — if set, all waits respect remaining budget
 ): Promise<ScrapedPost[]> {
+  const remaining = () => deadlineMs ? Math.max(0, deadlineMs - Date.now()) : Infinity;
+  const checkBudget = (minNeeded = 3000) => {
+    if (deadlineMs && remaining() < minNeeded) {
+      throw new Error("TIMEOUT");
+    }
+  };
+
   if (onStep) onStep(3); // Collecting post urls
+  checkBudget(5000); // Need at least 5s to be worth starting post collection
+
   // Grab initial links
   let postUrls = await page.evaluate(() => {
     const anchors = Array.from(document.querySelectorAll('a'));
     return anchors
-      .map(a => a.href)
-      .filter(href => href.includes('/p/') || href.includes('/reel/'))
-      .filter((value, index, self) => self.indexOf(value) === index);
+      .map((a: any) => a.href)
+      .filter((href: string) => href.includes('/p/') || href.includes('/reel/'))
+      .filter((value: string, index: number, self: string[]) => self.indexOf(value) === index);
   });
 
-  // Scroll to load more links if needed
+  // Scroll to load more — but only if we have time budget and need more posts
   let scrolls = 0;
-  while (postUrls.length < maxPosts && scrolls < 3) {
-    console.log(`Scrolling profile page to load more posts... Current unique count: ${postUrls.length}`);
+  while (postUrls.length < maxPosts && scrolls < 3 && remaining() > 8000) {
+    console.log(`Scrolling profile page to load more posts... Current unique count: ${postUrls.length}, Remaining: ${Math.round(remaining() / 1000)}s`);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(2000);
+
+    // Adaptive wait: use less time if budget is tighter
+    const scrollWait = Math.min(2000, Math.max(500, remaining() - 8000));
+    await page.waitForTimeout(scrollWait);
 
     const newUrls = await page.evaluate(() => {
       const anchors = Array.from(document.querySelectorAll('a'));
       return anchors
-        .map(a => a.href)
-        .filter(href => href.includes('/p/') || href.includes('/reel/'));
+        .map((a: any) => a.href)
+        .filter((href: string) => href.includes('/p/') || href.includes('/reel/'));
     });
 
     postUrls = [...new Set([...postUrls, ...newUrls])];
@@ -239,18 +252,38 @@ export async function extractPosts(
   }
 
   const targetUrls = postUrls.slice(0, maxPosts);
-  console.log(`Extracting details for ${targetUrls.length} posts...`);
+  console.log(`Extracting details for ${targetUrls.length} posts... Remaining budget: ${Math.round(remaining() / 1000)}s`);
   if (onStep && targetUrls.length > 0) onStep(4); // Visiting posts
 
   const scrapedPosts: ScrapedPost[] = [];
   for (const url of targetUrls) {
+    // Stop visiting posts if budget is too low to even navigate one more
+    const rem = remaining();
+    if (rem < 5000) {
+      console.warn(`[BUDGET] Only ${Math.round(rem / 1000)}s remaining — stopping post extraction early at ${scrapedPosts.length}/${targetUrls.length} posts`);
+      break;
+    }
+
+    // Clamp per-post navigation timeout to remaining budget minus 2s buffer
+    const navTimeout = Math.min(10000, Math.max(3000, rem - 2000));
+
     let attempts = 0;
     let success = false;
     while (attempts < 2 && !success) {
+      // Check budget before each attempt
+      if (remaining() < 3000) {
+        console.warn(`[BUDGET] Budget exhausted mid-post-scrape — skipping remaining posts`);
+        break;
+      }
+
       try {
-        console.log(`Scraping post: ${url} (Attempt ${attempts + 1}/2)`);
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 10000 });
-        await page.waitForTimeout(1000);
+        console.log(`Scraping post: ${url} (Attempt ${attempts + 1}/2, timeout: ${Math.round(navTimeout / 1000)}s)`);
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: navTimeout });
+
+        // Only wait 1s if we have the budget for it
+        if (remaining() > 4000) {
+          await page.waitForTimeout(Math.min(1000, remaining() - 3000));
+        }
 
         const desc = await page.evaluate(() => {
           const getMeta = (selector: string) =>
@@ -286,12 +319,17 @@ export async function extractPosts(
           console.warn(`No meta description tag found for post: ${url}`);
           success = true; // Don't retry missing tag errors
         }
-      } catch (err) {
+      } catch (err: any) {
+        // If the error is a budget timeout, propagate it immediately
+        if (err.message === "TIMEOUT") throw err;
+
         attempts++;
         console.error(`Failed to extract post details from ${url} (Attempt ${attempts}/2):`, err instanceof Error ? err.message : String(err));
-        if (attempts < 2) {
+        if (attempts < 2 && remaining() > 4000) {
           console.log(`Retrying post scrape for: ${url}`);
-          await page.waitForTimeout(1000);
+          await page.waitForTimeout(Math.min(1000, remaining() - 3000));
+        } else {
+          success = true; // Exhausted retries or no budget — move on
         }
       }
     }
@@ -368,104 +406,132 @@ export async function scrapeProfile(
     }
   }
 
+  // ─── DEADLINE SETUP ───────────────────────────────────────────────────────
+  // Single source of truth for the 60s budget. Every stage reads from this.
+  const HARD_LIMIT_MS = PROFILE_TIMEOUT_MS;          // 60 000 ms
   const startTime = Date.now();
-  console.log(`[TIMEOUT GUARD START] @${cleanUsername}`);
+  const deadlineMs = startTime + HARD_LIMIT_MS;      // absolute epoch deadline
 
-  let timeoutId: any;
+  const remaining = () => Math.max(0, deadlineMs - Date.now());
+  const elapsedStr = () => `${Date.now() - startTime}ms`;
+
+  // Hard outer timeout promise — fires at the exact deadline
+  let timeoutId: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
-      console.log(`[TIMEOUT HIT] @${cleanUsername}\nElapsed: ${Date.now() - startTime}ms`);
+      console.log(`[TIMEOUT HIT] @${cleanUsername} — elapsed: ${elapsedStr()}`);
       reject(new Error("TIMEOUT"));
-    }, PROFILE_TIMEOUT_MS);
+    }, HARD_LIMIT_MS);
   });
 
+  console.log(`[TIMEOUT GUARD START] @${cleanUsername} — budget: ${HARD_LIMIT_MS / 1000}s`);
+
+  // Outer-scope browser handles so finally can always clean up
   let browser: any = null;
   let context: any = null;
   let page: any = null;
 
-  const runScrape = async () => {
-    let attempts = 0;
-    const maxAttempts = 2;
+  const runScrape = async (): Promise<ScrapedInstagramResult> => {
+    // We allow at most 2 attempts, but only start attempt 2 if there's
+    // enough budget left (≥ 10 seconds) to make it worthwhile.
+    const MAX_ATTEMPTS = 2;
+    const MIN_BUDGET_FOR_RETRY_MS = 10_000;
     let lastError: any;
 
-    while (attempts < maxAttempts) {
-      attempts++;
-      console.log(`Starting profile scrape for @${cleanUsername} (Attempt ${attempts}/${maxAttempts})`);
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      // Guard: don't start a new attempt if budget is too low
+      if (attempt > 1 && remaining() < MIN_BUDGET_FOR_RETRY_MS) {
+        console.warn(`[BUDGET] Only ${Math.round(remaining() / 1000)}s left — skipping retry attempt for @${cleanUsername}`);
+        break;
+      }
+
+      console.log(`Starting profile scrape for @${cleanUsername} (Attempt ${attempt}/${MAX_ATTEMPTS}, remaining: ${Math.round(remaining() / 1000)}s)`);
 
       const profileUrl = `${INSTAGRAM_BASE_URL}/${cleanUsername}/`;
 
       try {
-        browser = await chromium.launch({
-          headless: options.headless ?? true,
-        });
+        browser = await chromium.launch({ headless: options.headless ?? true });
         context = await browser.newContext({
-          userAgent:
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         });
         page = await context.newPage();
 
-        if (options.onStep) options.onStep(1); // Opening profile
-        console.log(`Navigating to profile: ${profileUrl}`);
-        await page.goto(profileUrl, {
-          waitUntil: "networkidle",
-          timeout: options.timeoutMs ?? 30_000,
-        });
+        // ── STEP 1: Navigate to profile ──────────────────────────────────────
+        // Navigation timeout = min(25s, remaining - 5s buffer)
+        // Never let navigation eat more than 25s so we have time for posts.
+        const navTimeout = Math.min(25_000, Math.max(5_000, remaining() - 5_000));
+        if (options.onStep) options.onStep(1);
+        console.log(`Navigating to profile: ${profileUrl} (nav timeout: ${Math.round(navTimeout / 1000)}s)`);
+        await page.goto(profileUrl, { waitUntil: "networkidle", timeout: navTimeout });
 
-        if (options.onStep) options.onStep(2); // Extracting profile
+        // ── STEP 2: Extract profile metadata ─────────────────────────────────
+        if (options.onStep) options.onStep(2);
         const isPrivate = await page.evaluate(() => {
-          const bodyText = document.body.innerText;
+          const bodyText = (document.body as any).innerText as string;
           return bodyText.includes("This Account is Private") || bodyText.includes("This account is private");
         });
-        if (isPrivate) {
-          throw new Error("PRIVATE_ACCOUNT");
-        }
+        if (isPrivate) throw new Error("PRIVATE_ACCOUNT");
 
         const profile = await extractProfileData(page, cleanUsername);
         if (profile.postCount > 500) {
           throw new Error(`SKIPPED_LARGE_ACCOUNT:${profile.postCount}`);
         }
 
-        console.log(`Found ${profile.postCount} posts`);
+        console.log(`Found ${profile.postCount} posts. Budget remaining: ${Math.round(remaining() / 1000)}s`);
         console.log(`Limiting scrape to latest ${MAX_POSTS_PER_PROFILE} posts`);
-        const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep);
 
-        console.log(`[SCRAPE FINISHED] @${cleanUsername}\nElapsed: ${Date.now() - startTime}ms`);
-        return {
-          profile,
-          posts,
-        };
+        // ── STEP 3–4: Scrape posts with deadline awareness ───────────────────
+        const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep, deadlineMs);
+
+        console.log(`[SCRAPE FINISHED] @${cleanUsername} — elapsed: ${elapsedStr()}, posts collected: ${posts.length}`);
+        return { profile, posts };
+
       } catch (err: any) {
         lastError = err;
-        console.error(`Profile scrape attempt ${attempts} failed for @${cleanUsername}:`, err instanceof Error ? err.message : String(err));
-        
-        if (err.message === "PRIVATE_ACCOUNT" || err.message.startsWith("SKIPPED_LARGE_ACCOUNT:")) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error(`Profile scrape attempt ${attempt} failed for @${cleanUsername}: ${errMsg}`);
+
+        // Non-retryable conditions — propagate immediately
+        if (
+          err.message === "PRIVATE_ACCOUNT" ||
+          err.message === "TIMEOUT" ||
+          err.message.startsWith("SKIPPED_LARGE_ACCOUNT:")
+        ) {
           throw err;
         }
 
-        if (attempts < maxAttempts) {
-          console.log(`Retrying profile scrape for @${cleanUsername} in 2 seconds...`);
-          await new Promise(r => setTimeout(r, 2000));
+        // Only retry if we have meaningful budget left
+        if (attempt < MAX_ATTEMPTS && remaining() >= MIN_BUDGET_FOR_RETRY_MS) {
+          // Use a shorter retry delay if budget is tight
+          const retryDelay = Math.min(2000, Math.max(500, remaining() - MIN_BUDGET_FOR_RETRY_MS));
+          console.log(`Retrying profile scrape for @${cleanUsername} in ${Math.round(retryDelay / 1000)}s...`);
+          await new Promise(r => setTimeout(r, retryDelay));
         }
       } finally {
-        if (page) { await page.close().catch(() => {}); page = null; }
+        // Always clean up browser resources after each attempt
+        if (page)    { await page.close().catch(() => {}); page = null; }
         if (context) { await context.close().catch(() => {}); context = null; }
         if (browser) { await safeCloseBrowser(browser); browser = null; }
       }
     }
 
-    throw lastError;
+    throw lastError ?? new Error("Profile scrape failed after all attempts");
   };
 
   try {
     const result = await Promise.race([runScrape(), timeoutPromise]);
     return result;
   } finally {
-    clearTimeout(timeoutId);
-    if (page) await page.close().catch(() => {});
+    // Cancel hard timeout timer
+    clearTimeout(timeoutId!);
+    // Final safety net: close any lingering browser resources
+    if (page)    await page.close().catch(() => {});
     if (context) await context.close().catch(() => {});
     if (browser) await safeCloseBrowser(browser);
+    console.log(`[GUARD CLEARED] @${cleanUsername} — total elapsed: ${elapsedStr()}`);
   }
 }
+
 
 export interface DiscoveredUser {
   username: string;

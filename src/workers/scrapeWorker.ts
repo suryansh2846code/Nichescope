@@ -76,8 +76,8 @@ const worker = new Worker<ScrapeJobData>(
         console.log(`Skipping profile`);
         return {
           username,
-          status: "skipped",
-          reason: "Timeout",
+          status: "SKIPPED",
+          reason: "TIMEOUT",
           postsScraped: 0,
           profile: null,
           niche: job.data.niche,

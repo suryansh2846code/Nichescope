@@ -9,6 +9,59 @@ export class GeminiProvider implements AIProvider {
     this.modelName = modelName;
   }
 
+  /**
+   * Fetch with automatic 429 retry.
+   * Parses `retryDelay` from the Gemini error body and waits that duration
+   * before retrying. Caps the wait at 90 seconds. Gives up after maxRetries.
+   */
+  private async fetchWithRetry(
+    url: string,
+    init: RequestInit,
+    maxRetries = 3
+  ): Promise<Response> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const response = await fetch(url, init);
+
+      if (response.status !== 429) {
+        return response; // success or non-retryable error — caller handles it
+      }
+
+      // Parse the suggested retry delay from Gemini's error body
+      let waitMs = 35_000; // default 35s
+      try {
+        const clone = response.clone();
+        const errBody = await clone.json() as any;
+        const retryInfo = errBody?.error?.details?.find(
+          (d: any) => d["@type"] === "type.googleapis.com/google.rpc.RetryInfo"
+        );
+        if (retryInfo?.retryDelay) {
+          const seconds = parseFloat(retryInfo.retryDelay.replace("s", ""));
+          if (!isNaN(seconds)) {
+            waitMs = Math.min(Math.ceil(seconds) * 1000, 90_000);
+          }
+        }
+      } catch {
+        // ignore parse failures, use default wait
+      }
+
+      const waitSec = Math.round(waitMs / 1000);
+      console.warn(
+        `[GeminiProvider] 429 rate-limited (attempt ${attempt}/${maxRetries}). Waiting ${waitSec}s before retry...`
+      );
+
+      if (attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      } else {
+        const errText = await response.text();
+        lastError = new Error(`Gemini API error (status 429 — quota exhausted after ${maxRetries} retries): ${errText}`);
+      }
+    }
+
+    throw lastError ?? new Error("Gemini API rate limit exceeded after retries");
+  }
+
   async analyzeCaption(caption: string): Promise<AnalysisResult> {
     const systemPrompt = `You are an AI lead discovery agent. Analyze the provided Instagram caption and classify it into one of the categories and intents listed below. Also perform sentiment analysis.
 
@@ -59,11 +112,7 @@ Return a STRICT JSON response in this exact format, with no markdown wrappers or
       contents: [
         {
           role: "user",
-          parts: [
-            {
-              text: `${systemPrompt}\n\nCaption to analyze:\n"${caption}"`
-            }
-          ]
+          parts: [{ text: `${systemPrompt}\n\nCaption to analyze:\n"${caption}"` }]
         }
       ],
       generationConfig: {
@@ -73,7 +122,7 @@ Return a STRICT JSON response in this exact format, with no markdown wrappers or
     };
 
     try {
-      const response = await fetch(url, {
+      const response = await this.fetchWithRetry(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -137,7 +186,7 @@ Your response must be direct, plain text, and must strictly not exceed 250 chara
     };
 
     try {
-      const response = await fetch(url, {
+      const response = await this.fetchWithRetry(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -211,11 +260,7 @@ ${captions.map((c, i) => `${i + 1}. ${c}`).join("\n")}`;
       contents: [
         {
           role: "user",
-          parts: [
-            {
-              text: `${systemPrompt}\n\n${userPrompt}`
-            }
-          ]
+          parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
         }
       ],
       generationConfig: {
@@ -225,7 +270,7 @@ ${captions.map((c, i) => `${i + 1}. ${c}`).join("\n")}`;
     };
 
     try {
-      const response = await fetch(url, {
+      const response = await this.fetchWithRetry(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -260,67 +305,23 @@ ${captions.map((c, i) => `${i + 1}. ${c}`).join("\n")}`;
       };
     } catch (err) {
       console.error("Failed during Gemini lead qualification request, falling back to mock provider logic:", err);
-      // Fallback matching MockAIProvider's qualifyLead Heuristics
+      // Fallback matching MockAIProvider's qualifyLead heuristics
       const text = (summary + " " + captions.join(" ")).toLowerCase();
 
       if (text.includes("acne") || text.includes("dermatologist") || text.includes("skin")) {
-        return {
-          problem: "Acne",
-          serviceNeeded: "Dermatologist",
-          urgency: "high",
-          buyingIntent: 92,
-          confidence: 95,
-          qualificationReason: "User repeatedly asks for dermatologist recommendations.",
-        };
+        return { problem: "Acne", serviceNeeded: "Dermatologist", urgency: "high", buyingIntent: 92, confidence: 95, qualificationReason: "User repeatedly asks for dermatologist recommendations." };
       }
-
       if (text.includes("fitness") || text.includes("gym") || text.includes("workout") || text.includes("trainer")) {
-        return {
-          problem: "Weight gain",
-          serviceNeeded: "Personal Trainer",
-          urgency: "medium",
-          buyingIntent: 75,
-          confidence: 85,
-          qualificationReason: "User is looking for personal trainer and fitness suggestions.",
-        };
+        return { problem: "Weight gain", serviceNeeded: "Personal Trainer", urgency: "medium", buyingIntent: 75, confidence: 85, qualificationReason: "User is looking for personal trainer and fitness suggestions." };
       }
-
       if (text.includes("house") || text.includes("rent") || text.includes("apartment") || text.includes("home")) {
-        return {
-          problem: "Apartment search",
-          serviceNeeded: "Real Estate Agent",
-          urgency: "medium",
-          buyingIntent: 70,
-          confidence: 90,
-          qualificationReason: "User is looking to rent an apartment.",
-        };
+        return { problem: "Apartment search", serviceNeeded: "Real Estate Agent", urgency: "medium", buyingIntent: 70, confidence: 90, qualificationReason: "User is looking to rent an apartment." };
+      }
+      if (text.includes("job") || text.includes("career") || text.includes("hiring") || text.includes("recruiter") || text.includes("coding")) {
+        return { problem: "Job search", serviceNeeded: "Recruiter", urgency: "high", buyingIntent: 88, confidence: 92, qualificationReason: "User is actively seeking job opportunities." };
       }
 
-      if (
-        text.includes("job") ||
-        text.includes("career") ||
-        text.includes("hiring") ||
-        text.includes("recruiter") ||
-        text.includes("coding")
-      ) {
-        return {
-          problem: "Job search",
-          serviceNeeded: "Recruiter",
-          urgency: "high",
-          buyingIntent: 88,
-          confidence: 92,
-          qualificationReason: "User is actively seeking job opportunities.",
-        };
-      }
-
-      return {
-        problem: "General inquiry",
-        serviceNeeded: "Consultant",
-        urgency: "low",
-        buyingIntent: 40,
-        confidence: 80,
-        qualificationReason: "User is discussing general topics.",
-      };
+      return { problem: "General inquiry", serviceNeeded: "Consultant", urgency: "low", buyingIntent: 40, confidence: 80, qualificationReason: "User is discussing general topics." };
     }
   }
 }

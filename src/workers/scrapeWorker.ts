@@ -68,6 +68,33 @@ const worker = new Worker<ScrapeJobData>(
           maxFollowers: job.data.maxFollowers,
         };
       }
+      if (error.message.startsWith("SKIPPED_LARGE_ACCOUNT:")) {
+        const postCount = error.message.split(":")[1];
+        console.log(`Skipping @${username}`);
+        console.log(`Post count: ${postCount}`);
+        return {
+          username,
+          status: "skipped",
+          reason: "SKIPPED_LARGE_ACCOUNT",
+          postsScraped: 0,
+          profile: null,
+          niche: job.data.niche,
+          maxFollowers: job.data.maxFollowers,
+        };
+      }
+      if (error.message === "PRIVATE_ACCOUNT") {
+        console.log(`Skipping @${username}`);
+        console.log(`Private account`);
+        return {
+          username,
+          status: "skipped",
+          reason: "Private Account",
+          postsScraped: 0,
+          profile: null,
+          niche: job.data.niche,
+          maxFollowers: job.data.maxFollowers,
+        };
+      }
       throw error;
     }
   },

@@ -313,7 +313,19 @@ export async function scrapeProfile(
     });
 
     if (options.onStep) options.onStep(2); // Extracting profile
+    const isPrivate = await page.evaluate(() => {
+      const bodyText = document.body.innerText;
+      return bodyText.includes("This Account is Private") || bodyText.includes("This account is private");
+    });
+    if (isPrivate) {
+      throw new Error("PRIVATE_ACCOUNT");
+    }
+
     const profile = await extractProfileData(page, cleanUsername);
+    if (profile.postCount > 500) {
+      throw new Error(`SKIPPED_LARGE_ACCOUNT:${profile.postCount}`);
+    }
+
     console.log(`Found ${profile.postCount} posts`);
     console.log(`Limiting scrape to latest ${MAX_POSTS_PER_PROFILE} posts`);
     const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep);

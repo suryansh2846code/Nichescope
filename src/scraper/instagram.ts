@@ -379,6 +379,10 @@ export async function scrapeProfile(
     }, PROFILE_TIMEOUT_MS);
   });
 
+  let browser: any = null;
+  let context: any = null;
+  let page: any = null;
+
   const runScrape = async () => {
     let attempts = 0;
     const maxAttempts = 2;
@@ -389,15 +393,16 @@ export async function scrapeProfile(
       console.log(`Starting profile scrape for @${cleanUsername} (Attempt ${attempts}/${maxAttempts})`);
 
       const profileUrl = `${INSTAGRAM_BASE_URL}/${cleanUsername}/`;
-      const browser = await chromium.launch({
-        headless: options.headless ?? true,
-      });
 
       try {
-        const page = await browser.newPage({
+        browser = await chromium.launch({
+          headless: options.headless ?? true,
+        });
+        context = await browser.newContext({
           userAgent:
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         });
+        page = await context.newPage();
 
         if (options.onStep) options.onStep(1); // Opening profile
         console.log(`Navigating to profile: ${profileUrl}`);
@@ -442,7 +447,9 @@ export async function scrapeProfile(
           await new Promise(r => setTimeout(r, 2000));
         }
       } finally {
-        await safeCloseBrowser(browser);
+        if (page) { await page.close().catch(() => {}); page = null; }
+        if (context) { await context.close().catch(() => {}); context = null; }
+        if (browser) { await safeCloseBrowser(browser); browser = null; }
       }
     }
 
@@ -454,6 +461,9 @@ export async function scrapeProfile(
     return result;
   } finally {
     clearTimeout(timeoutId);
+    if (page) await page.close().catch(() => {});
+    if (context) await context.close().catch(() => {});
+    if (browser) await safeCloseBrowser(browser);
   }
 }
 

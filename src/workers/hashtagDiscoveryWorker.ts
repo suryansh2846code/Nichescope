@@ -73,6 +73,7 @@ const worker = new Worker<DiscoveryJobData>(
       let current = 0;
       const total = result.discoveries.length;
 
+      console.log("[DISCOVERY] Starting enqueue phase");
       for (const discovery of result.discoveries) {
         try {
           const username = discovery.username.toLowerCase();

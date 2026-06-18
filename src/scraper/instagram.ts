@@ -668,8 +668,10 @@ export async function scrapeHashtag(
     let scrolls = 0;
     while (postUrls.length < maxPosts && scrolls < 5) {
       console.log(`Scrolling hashtag page... Current unique count: ${postUrls.length}`);
+      console.log("[DISCOVERY] Starting scroll iteration");
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
       await page.waitForTimeout(2000);
+      console.log("[DISCOVERY] Scroll finished");
 
       const newUrls = await page.evaluate(() => {
         const anchors = Array.from(document.querySelectorAll('a'));
@@ -681,6 +683,7 @@ export async function scrapeHashtag(
       postUrls = [...new Set([...postUrls, ...newUrls])];
       scrolls++;
     }
+    console.log("[DISCOVERY] Exited scroll loop");
 
     const targetUrls = postUrls.slice(0, maxPosts);
     console.log(`Discovered ${targetUrls.length} posts for hashtag #${cleanHashtag}. Extracting authors...`);
@@ -737,11 +740,16 @@ export async function scrapeHashtag(
     }
 
     // Deduplicate discoveries by username in the current batch
+    console.log("[DISCOVERY] Extracting usernames");
     const uniqueDiscoveriesMap = new Map<string, DiscoveredUser>();
     for (const d of discoveries) {
       uniqueDiscoveriesMap.set(d.username, d);
     }
     const uniqueDiscoveries = Array.from(uniqueDiscoveriesMap.values());
+    const usernames = new Set(discoveries.map(d => d.username));
+    console.log(
+      `[DISCOVERY] Usernames extracted: ${usernames.size}`
+    );
 
     console.log(`Completed hashtag discovery. Found ${uniqueDiscoveries.length} unique authors.`);
 

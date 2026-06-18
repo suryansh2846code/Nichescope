@@ -309,7 +309,10 @@ export async function extractPosts(
     }
 
     if (emptyScrolls >= 3) {
-      console.warn(`[EARLY EXIT] No new post URLs discovered after 3 scroll attempts`);
+      console.warn(
+        `[EARLY EXIT]
+   No new URLs discovered after 3 scrolls`
+      );
       break;
     }
 

@@ -222,6 +222,25 @@ export async function extractPosts(
   if (onStep) onStep(3); // Collecting post urls
   checkBudget(5000); // Need at least 5s to be worth starting post collection
 
+  const postLinks = await page
+    .locator('a[href*="/p/"]')
+    .count();
+
+  const reelLinks = await page
+    .locator('a[href*="/reel/"]')
+    .count();
+
+  const totalAnchors = await page
+    .locator('a')
+    .count();
+
+  console.log(
+    `[DEBUG] URL Discovery:
+   anchors=${totalAnchors}
+   posts=${postLinks}
+   reels=${reelLinks}`
+  );
+
   // Grab initial links
   const initialData = await page.evaluate(() => {
     const anchors = Array.from(document.querySelectorAll('a'));

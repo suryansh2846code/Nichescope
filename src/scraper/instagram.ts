@@ -44,7 +44,7 @@ const INSTAGRAM_BASE_URL = "https://www.instagram.com";
 export const MAX_POSTS_PER_PROFILE = 12;
 export const PROFILE_TIMEOUT_MS = 60000;
 
-async function safeClose(resource: any, name: string, timeoutMs: number = 2000) {
+async function safeClose(resource: any, name: string, timeoutMs: number = 5000) {
   if (!resource) return;
   try {
     await Promise.race([
@@ -222,44 +222,55 @@ export async function extractPosts(
   if (onStep) onStep(3); // Collecting post urls
   checkBudget(5000); // Need at least 5s to be worth starting post collection
 
-  const postLinks = await page
-    .locator('a[href*="/p/"]')
-    .count();
+  // Wait for the post grid to actually render before extracting links.
+  // Instagram renders the grid asynchronously — without this wait, evaluate()
+  // runs while the DOM still has 0 post anchors, giving "Current unique count: 0".
+  try {
+    await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', {
+      timeout: Math.min(10000, Math.max(3000, remaining() - 3000)),
+    });
+  } catch {
+    console.warn("[WARN] Timed out waiting for post grid — attempting extraction anyway");
+  }
 
-  const reelLinks = await page
-    .locator('a[href*="/reel/"]')
-    .count();
+  // Extract all post/reel hrefs from the current DOM.
+  // Uses getAttribute("href") (raw path like /p/xxx) instead of a.href,
+  // which can be empty-string before the document base URL is resolved.
+  // Also normalises /reels/ → /reel/ and strips query params to avoid dupes.
+  const extractPostUrls = async (): Promise<string[]> => {
+    return page.evaluate((baseUrl: string) => {
+      const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
+      const seen = new Set<string>();
+      const results: string[] = [];
+      for (const a of anchors) {
+        const raw = a.getAttribute("href") || "";
+        if (!raw.match(/\/(p|reel|reels)\//)) continue;  // matches /p/, /reel/, /username/p/ etc.
+        // Normalise /reels/ → /reel/ for consistency
+        const normalised = raw.replace(/^\/reels\//, "/reel/");
+        const abs = `${baseUrl}${normalised}`;
+        // Strip query params (?img_index=1 etc.) to avoid treating same post as different
+        const clean = abs.split("?")[0].replace(/\/$/, "");
+        if (!seen.has(clean)) {
+          seen.add(clean);
+          results.push(clean);
+        }
+      }
+      return results;
+    }, "https://www.instagram.com");
+  };
 
-  const totalAnchors = await page
-    .locator('a')
-    .count();
+  const initialUrls = await extractPostUrls();
+  const totalAnchors = await page.locator('a').count();
 
   console.log(
     `[DEBUG] URL Discovery:
    anchors=${totalAnchors}
-   posts=${postLinks}
-   reels=${reelLinks}`
+   posts=${initialUrls.filter(u => u.includes('/p/')).length}
+   reels=${initialUrls.filter(u => u.includes('/reel/')).length}
+   total_collected=${initialUrls.length}`
   );
 
-  // Grab initial links
-  const initialData = await page.evaluate(() => {
-    const anchors = Array.from(document.querySelectorAll('a'));
-    const hrefs = anchors.map((a: any) => a.href || "");
-    const pLinks = hrefs.filter(h => h.includes('/p/'));
-    const reelLinks = hrefs.filter(h => h.includes('/reel/') || h.includes('/reels/'));
-    const filtered = hrefs
-      .filter((href: string) => href.includes('/p/') || href.includes('/reel/') || href.includes('/reels/'))
-      .filter((value: string, index: number, self: string[]) => self.indexOf(value) === index);
-
-    return {
-      totalAnchors: anchors.length,
-      pCount: pLinks.length,
-      reelCount: reelLinks.length,
-      urls: filtered
-    };
-  });
-
-  const postUrls = new Set<string>(initialData.urls);
+  const postUrls = new Set<string>(initialUrls);
 
   // Scroll to load more — but only if we have time budget and need more posts
   let scrolls = 0;
@@ -273,32 +284,15 @@ export async function extractPosts(
     const scrollWait = Math.min(2000, Math.max(500, remaining() - 8000));
     await page.waitForTimeout(scrollWait);
 
-    const scrollData = await page.evaluate(() => {
-      const anchors = Array.from(document.querySelectorAll('a'));
-      const hrefs = anchors.map((a: any) => a.href || "");
-      const pLinks = hrefs.filter(h => h.includes('/p/'));
-      const reelLinks = hrefs.filter(h => h.includes('/reel/') || h.includes('/reels/'));
-      const filtered = hrefs
-        .filter((href: string) => href.includes('/p/') || href.includes('/reel/') || href.includes('/reels/'));
-      return {
-        totalAnchors: anchors.length,
-        pCount: pLinks.length,
-        reelCount: reelLinks.length,
-        urls: filtered
-      };
-    });
-
-    for (const url of scrollData.urls) {
+    const scrollUrls = await extractPostUrls();
+    for (const url of scrollUrls) {
       postUrls.add(url);
     }
 
-    const currentPostLinks = await page.locator('a[href*="/p/"]').count();
-    const currentReelLinks = await page.locator('a[href*="/reel/"]').count();
-
     console.log(
-      `[DEBUG]
-   posts=${currentPostLinks}
-   reels=${currentReelLinks}
+      `[DEBUG] After scroll ${scrolls + 1}:
+   posts=${scrollUrls.filter(u => u.includes('/p/')).length}
+   reels=${scrollUrls.filter(u => u.includes('/reel/')).length}
    collected=${postUrls.size}`
     );
 
@@ -425,7 +419,7 @@ export async function scrapeProfile(
     const scenario = options.testScenario;
     if (options.onStep) options.onStep(1); // Opening profile
     await new Promise(r => setTimeout(r, 1000));
-    
+
     if (scenario === "timeout") {
       if (options.onStep) options.onStep(3); // Loading posts
       await new Promise(r => setTimeout(r, 1000));
@@ -529,11 +523,28 @@ export async function scrapeProfile(
       const profileUrl = `${INSTAGRAM_BASE_URL}/${cleanUsername}/`;
 
       try {
-        browser = await chromium.launch({ headless: options.headless ?? true });
+        browser = await chromium.launch({
+          headless: options.headless ?? true,
+          args: [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+          ],
+        });
         context = await browser.newContext({
-          userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          viewport: { width: 1280, height: 800 },
+          locale: "en-US",
+          timezoneId: "America/New_York",
+          extraHTTPHeaders: {
+            "Accept-Language": "en-US,en;q=0.9",
+          },
         });
         page = await context.newPage();
+        // Remove the webdriver flag that headless Chrome exposes — Instagram checks this
+        await page.addInitScript(() => {
+          Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+        });
 
         // ── STEP 1: Navigate to profile ──────────────────────────────────────
         // Navigation timeout = min(25s, remaining - 5s buffer)
@@ -592,9 +603,9 @@ export async function scrapeProfile(
         }
       } finally {
         // Always clean up browser resources after each attempt
-        if (page)    { await safeClose(page, "page", 1000); page = null; }
-        if (context) { await safeClose(context, "context", 1000); context = null; }
-        if (browser) { await safeClose(browser, "browser", 2000); browser = null; }
+        if (page) { await safeClose(page, "page", 3000); page = null; }
+        if (context) { await safeClose(context, "context", 3000); context = null; }
+        if (browser) { await safeClose(browser, "browser", 5000); browser = null; }
       }
     }
 
@@ -608,9 +619,9 @@ export async function scrapeProfile(
     // Cancel hard timeout timer
     clearTimeout(timeoutId!);
     // Final safety net: close any lingering browser resources
-    if (page)    await safeClose(page, "page", 1000);
-    if (context) await safeClose(context, "context", 1000);
-    if (browser) await safeClose(browser, "browser", 2000);
+    if (page) await safeClose(page, "page", 3000);
+    if (context) await safeClose(context, "context", 3000);
+    if (browser) await safeClose(browser, "browser", 5000);
     console.log(`[GUARD CLEARED] @${cleanUsername} — total elapsed: ${elapsedStr()}`);
   }
 }
@@ -655,14 +666,26 @@ export async function scrapeHashtag(
       timeout: options.timeoutMs ?? 30_000,
     });
 
+    // Helper to extract & normalise post/reel URLs from current DOM
+    const extractHashtagPostUrls = async (): Promise<string[]> => {
+      return page.evaluate((baseUrl: string) => {
+        const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
+        const seen = new Set<string>();
+        const results: string[] = [];
+        for (const a of anchors) {
+          const raw = a.getAttribute("href") || "";
+          if (!raw.match(/\/(p|reel|reels)\//)) continue;
+          const normalised = raw.replace(/^\/reels\//, "/reel/");
+          const abs = `${baseUrl}${normalised}`;
+          const clean = abs.split("?")[0].replace(/\/$/, "");
+          if (!seen.has(clean)) { seen.add(clean); results.push(clean); }
+        }
+        return results;
+      }, "https://www.instagram.com");
+    };
+
     // Grab post links
-    let postUrls = await page.evaluate(() => {
-      const anchors = Array.from(document.querySelectorAll('a'));
-      return anchors
-        .map(a => a.href)
-        .filter(href => href.includes('/p/') || href.includes('/reel/'))
-        .filter((value, index, self) => self.indexOf(value) === index);
-    });
+    let postUrls = await extractHashtagPostUrls();
 
     // Scroll page if we need more links
     let scrolls = 0;
@@ -673,13 +696,7 @@ export async function scrapeHashtag(
       await page.waitForTimeout(2000);
       console.log("[DISCOVERY] Scroll finished");
 
-      const newUrls = await page.evaluate(() => {
-        const anchors = Array.from(document.querySelectorAll('a'));
-        return anchors
-          .map(a => a.href)
-          .filter(href => href.includes('/p/') || href.includes('/reel/'));
-      });
-
+      const newUrls = await extractHashtagPostUrls();
       postUrls = [...new Set([...postUrls, ...newUrls])];
       scrolls++;
     }
@@ -691,6 +708,7 @@ export async function scrapeHashtag(
     const discoveries: DiscoveredUser[] = [];
     const startTime = Date.now();
     const HASHTAG_TIMEOUT_MS = 60000; // 60s total limit for post extraction
+    const PER_URL_TIMEOUT_MS = 8000;  // max 8s per individual post — prevents hanging reels
 
     for (const url of targetUrls) {
       if (Date.now() - startTime > HASHTAG_TIMEOUT_MS) {
@@ -698,45 +716,60 @@ export async function scrapeHashtag(
         break;
       }
 
-      let attempts = 0;
+      const urlStart = Date.now();
       let success = false;
-      while (attempts < 2 && !success) {
-        try {
-          console.log(`Scraping post to discover author: ${url} (Attempt ${attempts + 1}/2)`);
-          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 10000 });
-          await page.waitForTimeout(1000);
 
-          const desc = await page.evaluate(() => {
-            const getMeta = (selector: string) =>
-              document.querySelector<HTMLMetaElement>(selector)?.content || "";
-            return getMeta('meta[property="og:description"]') || getMeta('meta[name="description"]');
-          });
+      // Wrap the whole per-URL attempt in a hard timeout so a single hanging
+      // reel page (network stall, renderer crash, etc.) can never block the loop.
+      try {
+        await Promise.race([
+          (async () => {
+            let attempts = 0;
+            while (attempts < 2 && !success) {
+              try {
+                console.log(`[AUTHOR START] ${url} (Attempt ${attempts + 1}/2)`);
+                await page.goto(url, { waitUntil: "domcontentloaded", timeout: 7000 });
 
-          if (desc) {
-            const parsed = parsePostMetaDescription(desc);
-            if (parsed && parsed.username) {
-              discoveries.push({
-                username: parsed.username.toLowerCase(),
-                sourcePostUrl: url,
-              });
-              success = true;
-            } else {
-              console.warn(`Could not extract username from description for post: ${url}`);
-              success = true; // Don't retry parsing/extraction issues
+                const desc = await page.evaluate(() => {
+                  const getMeta = (selector: string) =>
+                    document.querySelector<HTMLMetaElement>(selector)?.content || "";
+                  return getMeta('meta[property="og:description"]') || getMeta('meta[name="description"]');
+                });
+
+                if (desc) {
+                  const parsed = parsePostMetaDescription(desc);
+                  if (parsed && parsed.username) {
+                    discoveries.push({
+                      username: parsed.username.toLowerCase(),
+                      sourcePostUrl: url,
+                    });
+                  } else {
+                    console.warn(`Could not extract username from description for post: ${url}`);
+                  }
+                } else {
+                  console.warn(`No description found for post: ${url}`);
+                }
+                success = true; // Either way, don't retry non-network failures
+              } catch (err) {
+                attempts++;
+                console.error(`Failed to scrape post author from ${url} (Attempt ${attempts}/2):`, err instanceof Error ? err.message : String(err));
+                if (attempts < 2) {
+                  await page.waitForTimeout(500);
+                }
+              }
             }
-          } else {
-            console.warn(`No description found for post: ${url}`);
-            success = true; // Don't retry missing tag errors
-          }
-        } catch (err) {
-          attempts++;
-          console.error(`Failed to scrape post author from ${url} (Attempt ${attempts}/2):`, err instanceof Error ? err.message : String(err));
-          if (attempts < 2) {
-            console.log(`Retrying post scrape for author: ${url}`);
-            await page.waitForTimeout(1000);
-          }
-        }
+          })(),
+          new Promise<void>((_, reject) =>
+            setTimeout(() => reject(new Error(`Per-URL timeout after ${PER_URL_TIMEOUT_MS}ms`)), PER_URL_TIMEOUT_MS)
+          ),
+        ]);
+      } catch (err) {
+        console.warn(`[AUTHOR SKIP] ${url} — ${err instanceof Error ? err.message : String(err)}`);
+        // Stop current navigation to unblock the page for the next URL
+        try { await page.evaluate(() => window.stop()); } catch { /* ignore */ }
       }
+
+      console.log(`[AUTHOR DONE] ${url} (${Date.now() - urlStart}ms)`);
     }
 
     // Deduplicate discoveries by username in the current batch

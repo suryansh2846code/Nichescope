@@ -415,6 +415,13 @@ export async function scrapeProfile(
       await new Promise(r => setTimeout(r, 500));
       throw new Error("SKIPPED_LARGE_ACCOUNT:1248");
     }
+    if (scenario === "no-posts-found") {
+      if (options.onStep) options.onStep(2); // Extracting profile
+      await new Promise(r => setTimeout(r, 500));
+      if (options.onStep) options.onStep(3); // Loading posts
+      await new Promise(r => setTimeout(r, 500));
+      throw new Error("NO_POSTS_FOUND");
+    }
     if (scenario === "failure") {
       if (options.onStep) options.onStep(3); // Loading posts
       await new Promise(r => setTimeout(r, 1000));

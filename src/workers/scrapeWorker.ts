@@ -99,16 +99,14 @@ const worker = new Worker<ScrapeJobData>(
           maxFollowers: job.data.maxFollowers,
         };
       }
-      if (error.message === "NO_POSTS_FOUND") {
-        console.warn(`[SKIPPED] No post URLs discovered for @${username}`);
+      if (error.message === "NO_POST_URLS_FOUND") {
+        console.warn(
+          `[SKIPPED]
+   No post URLs discovered for @${username}`
+        );
         return {
-          username,
           status: "SKIPPED",
-          reason: "NO_POSTS_FOUND",
-          postsScraped: 0,
-          profile: null,
-          niche: job.data.niche,
-          maxFollowers: job.data.maxFollowers,
+          reason: "NO_POST_URLS_FOUND"
         };
       }
       if (error.message.startsWith("SKIPPED_LARGE_ACCOUNT:")) {

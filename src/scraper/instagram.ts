@@ -319,6 +319,10 @@ export async function extractPosts(
     scrolls++;
   }
 
+  if (postUrls.size === 0) {
+    throw new Error("NO_POST_URLS_FOUND");
+  }
+
   const targetUrls = Array.from(postUrls).slice(0, maxPosts);
   console.log(`Extracting details for ${targetUrls.length} posts... Remaining budget: ${Math.round(remaining() / 1000)}s`);
   if (onStep && targetUrls.length > 0) onStep(4); // Visiting posts
@@ -437,12 +441,12 @@ export async function scrapeProfile(
       await new Promise(r => setTimeout(r, 500));
       throw new Error("SKIPPED_LARGE_ACCOUNT:1248");
     }
-    if (scenario === "no-posts-found") {
+    if (scenario === "no-post-urls-found") {
       if (options.onStep) options.onStep(2); // Extracting profile
       await new Promise(r => setTimeout(r, 500));
       if (options.onStep) options.onStep(3); // Loading posts
       await new Promise(r => setTimeout(r, 500));
-      throw new Error("NO_POSTS_FOUND");
+      throw new Error("NO_POST_URLS_FOUND");
     }
     if (scenario === "failure") {
       if (options.onStep) options.onStep(3); // Loading posts
@@ -558,7 +562,7 @@ export async function scrapeProfile(
         // ── STEP 3–4: Scrape posts with deadline awareness ───────────────────
         const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep, deadlineMs);
         if (posts.length === 0) {
-          throw new Error("NO_POSTS_FOUND");
+          throw new Error("NO_POST_URLS_FOUND");
         }
 
         console.log(`[SCRAPE FINISHED] @${cleanUsername} — elapsed: ${elapsedStr()}, posts collected: ${posts.length}`);
@@ -573,7 +577,7 @@ export async function scrapeProfile(
         if (
           err.message === "PRIVATE_ACCOUNT" ||
           err.message === "TIMEOUT" ||
-          err.message === "NO_POSTS_FOUND" ||
+          err.message === "NO_POST_URLS_FOUND" ||
           err.message.startsWith("SKIPPED_LARGE_ACCOUNT:")
         ) {
           throw err;

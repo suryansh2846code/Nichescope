@@ -552,7 +552,7 @@ export async function scrapeProfile(
         const navTimeout = Math.min(25_000, Math.max(5_000, remaining() - 5_000));
         if (options.onStep) options.onStep(1);
         console.log(`Navigating to profile: ${profileUrl} (nav timeout: ${Math.round(navTimeout / 1000)}s)`);
-        await page.goto(profileUrl, { waitUntil: "networkidle", timeout: navTimeout });
+        await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: navTimeout });
 
         // ── STEP 2: Extract profile metadata ─────────────────────────────────
         if (options.onStep) options.onStep(2);
@@ -652,19 +652,41 @@ export async function scrapeHashtag(
 
   const browser = await chromium.launch({
     headless: options.headless ?? true,
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+    ],
   });
 
   try {
-    const page = await browser.newPage({
-      userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      viewport: { width: 1280, height: 800 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+      extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+    });
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
     });
 
     console.log(`Navigating to hashtag page: ${hashtagUrl}`);
     await page.goto(hashtagUrl, {
-      waitUntil: "networkidle",
+      waitUntil: "domcontentloaded",
       timeout: options.timeoutMs ?? 30_000,
     });
+
+    // Debug: log sample hrefs and page title to diagnose login walls
+    const sampleHrefs = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('a[href]'))
+        .map(a => a.getAttribute('href') || '')
+        .filter(h => h.length > 1)
+        .slice(0, 15)
+    );
+    console.log('[HASHTAG DEBUG] Page title:', await page.title());
+    console.log('[HASHTAG DEBUG] Sample hrefs:', JSON.stringify(sampleHrefs.slice(0, 10)));
 
     // Helper to extract & normalise post/reel URLs from current DOM
     const extractHashtagPostUrls = async (): Promise<string[]> => {

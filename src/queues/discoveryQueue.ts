@@ -18,6 +18,9 @@ export const discoveryQueue = new Queue<DiscoveryJobData, unknown, typeof DISCOV
         type: "exponential",
         delay: 5_000,
       },
+      // Discovery jobs can take longer (multiple hashtags, author extraction).
+      // 5 minutes is generous but prevents infinite stalls.
+      timeout: 300_000,
       removeOnComplete: {
         age: 60 * 60 * 24,
         count: 100,

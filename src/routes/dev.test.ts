@@ -1,16 +1,31 @@
 import { describe, expect, test, mock, afterAll } from "bun:test";
 import { scrapeQueue } from "../queues/scrapeQueue";
 import { discoveryQueue } from "../queues/discoveryQueue";
+import { analysisQueue } from "../queues/analysisQueue";
+import { embeddingQueue } from "../queues/embeddingQueue";
+import { leadQualificationQueue } from "../queues/leadQualificationQueue";
+import { monitoringQueue } from "../queues/monitoringQueue";
+import { userIntelligenceQueue } from "../queues/userIntelligenceQueue";
 import devRouter from "./dev";
 
 describe("Developer Mode API Endpoints", () => {
-  const originalDrainScrape = scrapeQueue.drain;
-  const originalDrainDiscovery = discoveryQueue.drain;
+  const originalObliterateScrape = scrapeQueue.obliterate;
+  const originalObliterateDiscovery = discoveryQueue.obliterate;
+  const originalObliterateAnalysis = analysisQueue.obliterate;
+  const originalObliterateEmbedding = embeddingQueue.obliterate;
+  const originalObliterateLeadQual = leadQualificationQueue.obliterate;
+  const originalObliterateMonitoring = monitoringQueue.obliterate;
+  const originalObliterateUserIntel = userIntelligenceQueue.obliterate;
   const originalAddScrape = scrapeQueue.add;
 
   afterAll(() => {
-    scrapeQueue.drain = originalDrainScrape;
-    discoveryQueue.drain = originalDrainDiscovery;
+    scrapeQueue.obliterate = originalObliterateScrape;
+    discoveryQueue.obliterate = originalObliterateDiscovery;
+    analysisQueue.obliterate = originalObliterateAnalysis;
+    embeddingQueue.obliterate = originalObliterateEmbedding;
+    leadQualificationQueue.obliterate = originalObliterateLeadQual;
+    monitoringQueue.obliterate = originalObliterateMonitoring;
+    userIntelligenceQueue.obliterate = originalObliterateUserIntel;
     scrapeQueue.add = originalAddScrape;
   });
 
@@ -48,22 +63,27 @@ describe("Developer Mode API Endpoints", () => {
   };
 
   test("POST /dev/clear-queues drains both scrape and discovery queues", async () => {
-    let scrapeDrained = false;
-    let discoveryDrained = false;
+    let scrapeObliterated = false;
+    let discoveryObliterated = false;
 
-    scrapeQueue.drain = async (clean) => {
-      scrapeDrained = true;
+    scrapeQueue.obliterate = async (opts) => {
+      scrapeObliterated = true;
     };
-    discoveryQueue.drain = async (clean) => {
-      discoveryDrained = true;
+    discoveryQueue.obliterate = async (opts) => {
+      discoveryObliterated = true;
     };
+    analysisQueue.obliterate = async () => {};
+    embeddingQueue.obliterate = async () => {};
+    leadQualificationQueue.obliterate = async () => {};
+    monitoringQueue.obliterate = async () => {};
+    userIntelligenceQueue.obliterate = async () => {};
 
     const { status, data } = await runRouteHandler(0, "POST");
 
     expect(status).toBe(200);
     expect(data.message).toBe("Queues cleared successfully");
-    expect(scrapeDrained).toBe(true);
-    expect(discoveryDrained).toBe(true);
+    expect(scrapeObliterated).toBe(true);
+    expect(discoveryObliterated).toBe(true);
   });
 
   test("POST /dev/trigger-scenario enqueues scenario successfully", async () => {

@@ -248,7 +248,9 @@ export async function extractPosts(
 
   // Scroll to load more — but only if we have time budget and need more posts
   let scrolls = 0;
-  while (postUrls.length < maxPosts && scrolls < 3 && remaining() > 8000) {
+  let emptyScrolls = 0;
+  while (postUrls.length < maxPosts && scrolls < 5 && remaining() > 8000) {
+    const previousSize = postUrls.length;
     console.log(`Scrolling profile page to load more posts... Current unique count: ${postUrls.length}, Remaining: ${Math.round(remaining() / 1000)}s`);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 
@@ -276,6 +278,18 @@ export async function extractPosts(
 
     postUrls = [...new Set([...postUrls, ...scrollData.urls])];
     console.log(`[DEBUG] Current unique URLs: ${postUrls.length}`);
+
+    if (postUrls.length === previousSize) {
+      emptyScrolls++;
+    } else {
+      emptyScrolls = 0;
+    }
+
+    if (emptyScrolls >= 3) {
+      console.warn(`[EARLY EXIT] No new post URLs discovered after 3 scroll attempts`);
+      break;
+    }
+
     scrolls++;
   }
 

@@ -223,13 +223,28 @@ export async function extractPosts(
   checkBudget(5000); // Need at least 5s to be worth starting post collection
 
   // Grab initial links
-  let postUrls = await page.evaluate(() => {
+  const initialData = await page.evaluate(() => {
     const anchors = Array.from(document.querySelectorAll('a'));
-    return anchors
-      .map((a: any) => a.href)
+    const hrefs = anchors.map((a: any) => a.href || "");
+    const pLinks = hrefs.filter(h => h.includes('/p/'));
+    const reelLinks = hrefs.filter(h => h.includes('/reel/'));
+    const filtered = hrefs
       .filter((href: string) => href.includes('/p/') || href.includes('/reel/'))
       .filter((value: string, index: number, self: string[]) => self.indexOf(value) === index);
+
+    return {
+      totalAnchors: anchors.length,
+      pCount: pLinks.length,
+      reelCount: reelLinks.length,
+      urls: filtered
+    };
   });
+
+  let postUrls = initialData.urls;
+
+  console.log(`[DEBUG] Total anchors: ${initialData.totalAnchors}`);
+  console.log(`[DEBUG] Post links found: ${initialData.pCount + initialData.reelCount}`);
+  console.log(`[DEBUG] Current unique URLs: ${postUrls.length}`);
 
   // Scroll to load more — but only if we have time budget and need more posts
   let scrolls = 0;
@@ -241,14 +256,26 @@ export async function extractPosts(
     const scrollWait = Math.min(2000, Math.max(500, remaining() - 8000));
     await page.waitForTimeout(scrollWait);
 
-    const newUrls = await page.evaluate(() => {
+    const scrollData = await page.evaluate(() => {
       const anchors = Array.from(document.querySelectorAll('a'));
-      return anchors
-        .map((a: any) => a.href)
+      const hrefs = anchors.map((a: any) => a.href || "");
+      const pLinks = hrefs.filter(h => h.includes('/p/'));
+      const reelLinks = hrefs.filter(h => h.includes('/reel/'));
+      const filtered = hrefs
         .filter((href: string) => href.includes('/p/') || href.includes('/reel/'));
+      return {
+        totalAnchors: anchors.length,
+        pCount: pLinks.length,
+        reelCount: reelLinks.length,
+        urls: filtered
+      };
     });
 
-    postUrls = [...new Set([...postUrls, ...newUrls])];
+    console.log(`[DEBUG] Total anchors: ${scrollData.totalAnchors}`);
+    console.log(`[DEBUG] Post links found: ${scrollData.pCount + scrollData.reelCount}`);
+
+    postUrls = [...new Set([...postUrls, ...scrollData.urls])];
+    console.log(`[DEBUG] Current unique URLs: ${postUrls.length}`);
     scrolls++;
   }
 

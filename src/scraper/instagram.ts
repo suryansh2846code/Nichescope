@@ -528,6 +528,9 @@ export async function scrapeProfile(
 
         // ── STEP 3–4: Scrape posts with deadline awareness ───────────────────
         const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep, deadlineMs);
+        if (posts.length === 0) {
+          throw new Error("NO_POSTS_FOUND");
+        }
 
         console.log(`[SCRAPE FINISHED] @${cleanUsername} — elapsed: ${elapsedStr()}, posts collected: ${posts.length}`);
         return { profile, posts };
@@ -541,6 +544,7 @@ export async function scrapeProfile(
         if (
           err.message === "PRIVATE_ACCOUNT" ||
           err.message === "TIMEOUT" ||
+          err.message === "NO_POSTS_FOUND" ||
           err.message.startsWith("SKIPPED_LARGE_ACCOUNT:")
         ) {
           throw err;

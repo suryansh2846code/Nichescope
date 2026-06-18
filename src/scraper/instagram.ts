@@ -259,20 +259,14 @@ export async function extractPosts(
     };
   });
 
-  let postUrls = initialData.urls;
-
-  console.log(`[DEBUG] Total anchors: ${initialData.totalAnchors}`);
-  console.log(`[DEBUG] /p/ links: ${initialData.pCount}`);
-  console.log(`[DEBUG] /reel/ links: ${initialData.reelCount}`);
-  console.log(`[DEBUG] Post links found: ${initialData.pCount + initialData.reelCount}`);
-  console.log(`[DEBUG] Current unique URLs: ${postUrls.length}`);
+  const postUrls = new Set<string>(initialData.urls);
 
   // Scroll to load more — but only if we have time budget and need more posts
   let scrolls = 0;
   let emptyScrolls = 0;
-  while (postUrls.length < maxPosts && scrolls < 5 && remaining() > 8000) {
-    const previousSize = postUrls.length;
-    console.log(`Scrolling profile page to load more posts... Current unique count: ${postUrls.length}, Remaining: ${Math.round(remaining() / 1000)}s`);
+  while (postUrls.size < maxPosts && scrolls < 5 && remaining() > 8000) {
+    const previousSize = postUrls.size;
+    console.log(`Scrolling profile page to load more posts... Current unique count: ${postUrls.size}, Remaining: ${Math.round(remaining() / 1000)}s`);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 
     // Adaptive wait: use less time if budget is tighter
@@ -294,15 +288,21 @@ export async function extractPosts(
       };
     });
 
-    console.log(`[DEBUG] Total anchors: ${scrollData.totalAnchors}`);
-    console.log(`[DEBUG] /p/ links: ${scrollData.pCount}`);
-    console.log(`[DEBUG] /reel/ links: ${scrollData.reelCount}`);
-    console.log(`[DEBUG] Post links found: ${scrollData.pCount + scrollData.reelCount}`);
+    for (const url of scrollData.urls) {
+      postUrls.add(url);
+    }
 
-    postUrls = [...new Set([...postUrls, ...scrollData.urls])];
-    console.log(`[DEBUG] Current unique URLs: ${postUrls.length}`);
+    const currentPostLinks = await page.locator('a[href*="/p/"]').count();
+    const currentReelLinks = await page.locator('a[href*="/reel/"]').count();
 
-    if (postUrls.length === previousSize) {
+    console.log(
+      `[DEBUG]
+   posts=${currentPostLinks}
+   reels=${currentReelLinks}
+   collected=${postUrls.size}`
+    );
+
+    if (postUrls.size === previousSize) {
       emptyScrolls++;
     } else {
       emptyScrolls = 0;
@@ -316,7 +316,7 @@ export async function extractPosts(
     scrolls++;
   }
 
-  const targetUrls = postUrls.slice(0, maxPosts);
+  const targetUrls = Array.from(postUrls).slice(0, maxPosts);
   console.log(`Extracting details for ${targetUrls.length} posts... Remaining budget: ${Math.round(remaining() / 1000)}s`);
   if (onStep && targetUrls.length > 0) onStep(4); // Visiting posts
 

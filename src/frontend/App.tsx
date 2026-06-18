@@ -685,6 +685,8 @@ export default function App() {
           if (activeDiscoveryKeyword) {
             fetchDiscoveredUsers(activeDiscoveryKeyword);
           }
+          // Clear the job card after 5s so the dashboard doesn't stay frozen on last state
+          setTimeout(() => setJob(null), 5000);
         }
       } catch (err) {
         setJobError(err instanceof Error ? err.message : "Error tracking job");
@@ -1128,9 +1130,12 @@ export default function App() {
                   {job && (
                     <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", fontSize: "0.8rem" }}>
                       <div>Status: <span style={{ color: "var(--color-accent)" }}>{job.state.toUpperCase()}</span></div>
-                      {job.state === "active" && job.processedOn && (
+                      {job.processedOn && (
                         <div style={{ color: "var(--color-text-dim)" }}>
-                          Elapsed: {Math.floor((Date.now() - job.processedOn) / 1000)}s
+                          {job.state === "active"
+                            ? `Elapsed: ${Math.floor((Date.now() - job.processedOn) / 1000)}s`
+                            : `Finished in: ${Math.floor(((job as any).finishedOn ?? Date.now()) - job.processedOn) / 1000}s`
+                          }
                         </div>
                       )}
                       {typeof job.progress === "object" && job.progress !== null ? (
@@ -1919,7 +1924,7 @@ export default function App() {
 
               return filtered.map((log, index) => {
                 const dateStr = new Date(log.timestamp).toLocaleTimeString();
-                
+
                 // Determine message color based on log level/message text
                 let msgColor = "#e2e8f0";
                 if (log.level === "error" || log.message.toLowerCase().includes("fail") || log.message.toLowerCase().includes("error")) {
@@ -1950,10 +1955,10 @@ export default function App() {
       {activeTab === "developer" && (
         <div className="developer-container animate-fade-in" style={{ padding: "0 1rem" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "2rem", alignItems: "start" }}>
-            
+
             {/* Left Column: Feature Testing Deck */}
             <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-              
+
               {/* Feature Test Grid */}
               <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
                 <div>
@@ -1962,9 +1967,9 @@ export default function App() {
                     Simulate edge cases, constraints, and stability behaviors locally without using live Instagram API sessions.
                   </p>
                 </div>
-                
+
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-                  
+
                   {/* Card 1: 12-Post Cap */}
                   <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "1rem", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "1rem" }}>
                     <div>
@@ -2130,11 +2135,11 @@ export default function App() {
 
             {/* Right Column: Jobs Pipeline Monitor */}
             <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-              
+
               {/* Queue Stats Counters */}
               <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                 <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>⚙️ Queue Status</h3>
-                
+
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
                   <div className="glass-card" style={{ background: "rgba(255, 255, 255, 0.01)", padding: "0.75rem", textAlign: "center", borderLeft: "3px solid #ffb600" }}>
                     <div style={{ color: "var(--color-text-dim)", fontSize: "0.7rem", textTransform: "uppercase" }}>Waiting</div>

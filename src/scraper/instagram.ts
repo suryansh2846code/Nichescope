@@ -227,9 +227,9 @@ export async function extractPosts(
     const anchors = Array.from(document.querySelectorAll('a'));
     const hrefs = anchors.map((a: any) => a.href || "");
     const pLinks = hrefs.filter(h => h.includes('/p/'));
-    const reelLinks = hrefs.filter(h => h.includes('/reel/'));
+    const reelLinks = hrefs.filter(h => h.includes('/reel/') || h.includes('/reels/'));
     const filtered = hrefs
-      .filter((href: string) => href.includes('/p/') || href.includes('/reel/'))
+      .filter((href: string) => href.includes('/p/') || href.includes('/reel/') || href.includes('/reels/'))
       .filter((value: string, index: number, self: string[]) => self.indexOf(value) === index);
 
     return {
@@ -243,6 +243,8 @@ export async function extractPosts(
   let postUrls = initialData.urls;
 
   console.log(`[DEBUG] Total anchors: ${initialData.totalAnchors}`);
+  console.log(`[DEBUG] /p/ links: ${initialData.pCount}`);
+  console.log(`[DEBUG] /reel/ links: ${initialData.reelCount}`);
   console.log(`[DEBUG] Post links found: ${initialData.pCount + initialData.reelCount}`);
   console.log(`[DEBUG] Current unique URLs: ${postUrls.length}`);
 
@@ -262,9 +264,9 @@ export async function extractPosts(
       const anchors = Array.from(document.querySelectorAll('a'));
       const hrefs = anchors.map((a: any) => a.href || "");
       const pLinks = hrefs.filter(h => h.includes('/p/'));
-      const reelLinks = hrefs.filter(h => h.includes('/reel/'));
+      const reelLinks = hrefs.filter(h => h.includes('/reel/') || h.includes('/reels/'));
       const filtered = hrefs
-        .filter((href: string) => href.includes('/p/') || href.includes('/reel/'));
+        .filter((href: string) => href.includes('/p/') || href.includes('/reel/') || href.includes('/reels/'));
       return {
         totalAnchors: anchors.length,
         pCount: pLinks.length,
@@ -274,6 +276,8 @@ export async function extractPosts(
     });
 
     console.log(`[DEBUG] Total anchors: ${scrollData.totalAnchors}`);
+    console.log(`[DEBUG] /p/ links: ${scrollData.pCount}`);
+    console.log(`[DEBUG] /reel/ links: ${scrollData.reelCount}`);
     console.log(`[DEBUG] Post links found: ${scrollData.pCount + scrollData.reelCount}`);
 
     postUrls = [...new Set([...postUrls, ...scrollData.urls])];

@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { scrapeQueue } from "../queues/scrapeQueue";
 import { discoveryQueue } from "../queues/discoveryQueue";
+import {
+  influencerDiscoveryQueue,
+  commentScrapeQueue,
+  commentAnalysisQueue,
+} from "../queues/commentQueues";
 
 const router = Router();
 
@@ -8,9 +13,17 @@ router.get("/", async (req, res, next) => {
   try {
     const limit = 50;
 
-    const [discoveryJobs, scrapeJobs] = await Promise.all([
+    // Original job fetching:
+    // const [discoveryJobs, scrapeJobs] = await Promise.all([
+    //   discoveryQueue.getJobs(["active", "waiting", "completed", "failed", "delayed", "paused"], 0, limit, false),
+    //   scrapeQueue.getJobs(["active", "waiting", "completed", "failed", "delayed", "paused"], 0, limit, false)
+    // ]);
+    const [discoveryJobs, scrapeJobs, influencerJobs, commScrapeJobs, commAnalysisJobs] = await Promise.all([
       discoveryQueue.getJobs(["active", "waiting", "completed", "failed", "delayed", "paused"], 0, limit, false),
-      scrapeQueue.getJobs(["active", "waiting", "completed", "failed", "delayed", "paused"], 0, limit, false)
+      scrapeQueue.getJobs(["active", "waiting", "completed", "failed", "delayed", "paused"], 0, limit, false),
+      influencerDiscoveryQueue.getJobs(["active", "waiting", "completed", "failed", "delayed", "paused"], 0, limit, false),
+      commentScrapeQueue.getJobs(["active", "waiting", "completed", "failed", "delayed", "paused"], 0, limit, false),
+      commentAnalysisQueue.getJobs(["active", "waiting", "completed", "failed", "delayed", "paused"], 0, limit, false)
     ]);
 
     const formatJob = async (job: any, queueName: string) => {
@@ -34,12 +47,27 @@ router.get("/", async (req, res, next) => {
       };
     };
 
-    const [formattedDiscovery, formattedScrape] = await Promise.all([
+    // Original formatting:
+    // const [formattedDiscovery, formattedScrape] = await Promise.all([
+    //   Promise.all(discoveryJobs.map(j => formatJob(j, "discovery"))),
+    //   Promise.all(scrapeJobs.map(j => formatJob(j, "scrape")))
+    // ]);
+    // const allJobs = [...formattedDiscovery, ...formattedScrape].sort((a, b) => b.timestamp - a.timestamp);
+    const [formattedDiscovery, formattedScrape, formattedInfluencer, formattedCommScrape, formattedCommAnalysis] = await Promise.all([
       Promise.all(discoveryJobs.map(j => formatJob(j, "discovery"))),
-      Promise.all(scrapeJobs.map(j => formatJob(j, "scrape")))
+      Promise.all(scrapeJobs.map(j => formatJob(j, "scrape"))),
+      Promise.all(influencerJobs.map(j => formatJob(j, "influencer-discovery"))),
+      Promise.all(commScrapeJobs.map(j => formatJob(j, "comment-scrape"))),
+      Promise.all(commAnalysisJobs.map(j => formatJob(j, "comment-analysis")))
     ]);
 
-    const allJobs = [...formattedDiscovery, ...formattedScrape].sort((a, b) => b.timestamp - a.timestamp);
+    const allJobs = [
+      ...formattedDiscovery,
+      ...formattedScrape,
+      ...formattedInfluencer,
+      ...formattedCommScrape,
+      ...formattedCommAnalysis
+    ].sort((a, b) => b.timestamp - a.timestamp);
 
     res.json(allJobs);
   } catch (error) {
@@ -49,9 +77,33 @@ router.get("/", async (req, res, next) => {
 
 router.get("/stats", async (req, res, next) => {
   try {
+    // Original stats:
+    // const [
+    //   discWaiting, discActive, discCompleted, discFailed,
+    //   scrapeWaiting, scrapeActive, scrapeCompleted, scrapeFailed
+    // ] = await Promise.all([
+    //   discoveryQueue.getWaitingCount(),
+    //   discoveryQueue.getActiveCount(),
+    //   discoveryQueue.getCompletedCount(),
+    //   discoveryQueue.getFailedCount(),
+    //   scrapeQueue.getWaitingCount(),
+    //   scrapeQueue.getActiveCount(),
+    //   scrapeQueue.getCompletedCount(),
+    //   scrapeQueue.getFailedCount()
+    // ]);
+    //
+    // res.json({
+    //   waiting: discWaiting + scrapeWaiting,
+    //   active: discActive + scrapeActive,
+    //   completed: discCompleted + scrapeCompleted,
+    //   failed: discFailed + scrapeFailed
+    // });
     const [
       discWaiting, discActive, discCompleted, discFailed,
-      scrapeWaiting, scrapeActive, scrapeCompleted, scrapeFailed
+      scrapeWaiting, scrapeActive, scrapeCompleted, scrapeFailed,
+      infWaiting, infActive, infCompleted, infFailed,
+      cScrapeWaiting, cScrapeActive, cScrapeCompleted, cScrapeFailed,
+      cAnalWaiting, cAnalActive, cAnalCompleted, cAnalFailed
     ] = await Promise.all([
       discoveryQueue.getWaitingCount(),
       discoveryQueue.getActiveCount(),
@@ -60,14 +112,26 @@ router.get("/stats", async (req, res, next) => {
       scrapeQueue.getWaitingCount(),
       scrapeQueue.getActiveCount(),
       scrapeQueue.getCompletedCount(),
-      scrapeQueue.getFailedCount()
+      scrapeQueue.getFailedCount(),
+      influencerDiscoveryQueue.getWaitingCount(),
+      influencerDiscoveryQueue.getActiveCount(),
+      influencerDiscoveryQueue.getCompletedCount(),
+      influencerDiscoveryQueue.getFailedCount(),
+      commentScrapeQueue.getWaitingCount(),
+      commentScrapeQueue.getActiveCount(),
+      commentScrapeQueue.getCompletedCount(),
+      commentScrapeQueue.getFailedCount(),
+      commentAnalysisQueue.getWaitingCount(),
+      commentAnalysisQueue.getActiveCount(),
+      commentAnalysisQueue.getCompletedCount(),
+      commentAnalysisQueue.getFailedCount()
     ]);
 
     res.json({
-      waiting: discWaiting + scrapeWaiting,
-      active: discActive + scrapeActive,
-      completed: discCompleted + scrapeCompleted,
-      failed: discFailed + scrapeFailed
+      waiting: discWaiting + scrapeWaiting + infWaiting + cScrapeWaiting + cAnalWaiting,
+      active: discActive + scrapeActive + infActive + cScrapeActive + cAnalActive,
+      completed: discCompleted + scrapeCompleted + infCompleted + cScrapeCompleted + cAnalCompleted,
+      failed: discFailed + scrapeFailed + infFailed + cScrapeFailed + cAnalFailed
     });
   } catch (error) {
     next(error);
@@ -86,14 +150,18 @@ router.get("/:id", async (req, res, next) => {
     let job: any = null;
     if (id.startsWith("discover-")) {
       job = await discoveryQueue.getJob(id);
-      if (!job) {
-        job = await scrapeQueue.getJob(id);
-      }
+      if (!job) job = await influencerDiscoveryQueue.getJob(id);
+      if (!job) job = await scrapeQueue.getJob(id);
+    } else if (id.startsWith("comments-")) {
+      job = await commentScrapeQueue.getJob(id);
+    } else if (id.startsWith("analyze-")) {
+      job = await commentAnalysisQueue.getJob(id);
     } else {
       job = await scrapeQueue.getJob(id);
-      if (!job) {
-        job = await discoveryQueue.getJob(id);
-      }
+      if (!job) job = await discoveryQueue.getJob(id);
+      if (!job) job = await influencerDiscoveryQueue.getJob(id);
+      if (!job) job = await commentScrapeQueue.getJob(id);
+      if (!job) job = await commentAnalysisQueue.getJob(id);
     }
 
     if (!job) {

@@ -7,7 +7,13 @@ import { UserIntelligence } from "../models/UserIntelligence";
 import { LeadScoreHistory } from "../models/LeadScoreHistory";
 import { PostAnalysis } from "../models/PostAnalysis";
 
+import { SeedInfluencer } from "../models/SeedInfluencer";
+
 const router = Router();
+
+// ... (keep the rest as is, we'll replace the GET /inbox/:username endpoint below)
+// But wait, the replace_file_content tool requires a contiguous block of text, so let's specify exactly what to replace in src/routes/leads.ts.
+
 
 router.post("/", async (req, res, next) => {
   try {
@@ -134,6 +140,7 @@ router.get("/inbox", async (req, res, next) => {
 });
 
 // GET /leads/inbox/:username
+/*
 router.get("/inbox/:username", async (req, res, next) => {
   try {
     const { username } = req.params;
@@ -167,6 +174,59 @@ router.get("/inbox/:username", async (req, res, next) => {
       supportingPosts,
       userIntelligence,
       leadHistory,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+*/
+
+router.get("/inbox/:username", async (req, res, next) => {
+  try {
+    const { username } = req.params;
+    if (!username) {
+      res.status(400).json({ error: "username parameter is required" });
+      return;
+    }
+
+    const normalizedUser = username.toLowerCase().trim();
+
+    // 1. Fetch LeadQualification record
+    const qualification = await LeadQualification.findOne({ username: normalizedUser });
+    if (!qualification) {
+      res.status(404).json({ error: "Lead qualification not found for this user" });
+      return;
+    }
+
+    // 2. Fetch UserIntelligence record
+    const userIntelligence = await UserIntelligence.findOne({ username: normalizedUser });
+
+    // 3. Fetch supporting posts (original Post records matching postIds of user's analyzed posts)
+    const analyses = await PostAnalysis.find({ username: normalizedUser });
+    const postIds = analyses.map((a) => a.postId);
+    const supportingPosts = await Post.find({ postId: { $in: postIds } }).sort({ postedAt: -1 });
+
+    // 4. Fetch LeadScoreHistory records for user
+    const leadHistory = await LeadScoreHistory.find({ username: normalizedUser }).sort({ recordedAt: 1 });
+
+    // 5. Fetch Lead profile & Following list overlap
+    const lead = await Lead.findOne({ username: new RegExp(`^${normalizedUser}$`, "i") });
+    let matchedFollowings: string[] = [];
+    if (lead && lead.followingHandles && lead.followingHandles.length > 0) {
+      const activeSeeds = await SeedInfluencer.find({
+        username: { $in: lead.followingHandles.map((h: string) => h.toLowerCase().trim()) },
+        isActive: true
+      });
+      matchedFollowings = activeSeeds.map((s: any) => s.username);
+    }
+
+    res.json({
+      qualification,
+      supportingPosts,
+      userIntelligence,
+      leadHistory,
+      lead,
+      matchedFollowings
     });
   } catch (error) {
     next(error);

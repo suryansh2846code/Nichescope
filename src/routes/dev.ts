@@ -6,11 +6,26 @@ import { embeddingQueue } from "../queues/embeddingQueue";
 import { leadQualificationQueue } from "../queues/leadQualificationQueue";
 import { monitoringQueue } from "../queues/monitoringQueue";
 import { userIntelligenceQueue } from "../queues/userIntelligenceQueue";
+import {
+  influencerDiscoveryQueue,
+  commentScrapeQueue,
+  commentAnalysisQueue,
+} from "../queues/commentQueues";
 
 const router = Router();
 
 router.post("/clear-queues", async (req, res, next) => {
   try {
+    // Original Promise.all call:
+    // await Promise.all([
+    //   scrapeQueue.obliterate({ force: true }),
+    //   discoveryQueue.obliterate({ force: true }),
+    //   analysisQueue.obliterate({ force: true }),
+    //   embeddingQueue.obliterate({ force: true }),
+    //   leadQualificationQueue.obliterate({ force: true }),
+    //   monitoringQueue.obliterate({ force: true }),
+    //   userIntelligenceQueue.obliterate({ force: true }),
+    // ]);
     await Promise.all([
       scrapeQueue.obliterate({ force: true }),
       discoveryQueue.obliterate({ force: true }),
@@ -19,6 +34,9 @@ router.post("/clear-queues", async (req, res, next) => {
       leadQualificationQueue.obliterate({ force: true }),
       monitoringQueue.obliterate({ force: true }),
       userIntelligenceQueue.obliterate({ force: true }),
+      influencerDiscoveryQueue.obliterate({ force: true }),
+      commentScrapeQueue.obliterate({ force: true }),
+      commentAnalysisQueue.obliterate({ force: true }),
     ]);
     res.json({ message: "Queues cleared successfully" });
   } catch (err) {

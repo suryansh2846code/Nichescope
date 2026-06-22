@@ -3,6 +3,8 @@ import { LeadPipeline } from "../models/LeadPipeline";
 import { LeadActivity } from "../models/LeadActivity";
 import { LeadQualification } from "../models/LeadQualification";
 import { UserIntelligence } from "../models/UserIntelligence";
+import { Lead } from "../models/Lead";
+import { SeedInfluencer } from "../models/SeedInfluencer";
 
 const router = Router();
 
@@ -99,6 +101,7 @@ router.get("/activity", async (req, res, next) => {
 });
 
 // GET /crm/leads/:username - Lead deep-dive
+/*
 router.get("/leads/:username", async (req, res, next) => {
   try {
     const { username } = req.params;
@@ -124,6 +127,51 @@ router.get("/leads/:username", async (req, res, next) => {
       qualification,
       userIntelligence,
       activity,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+*/
+
+router.get("/leads/:username", async (req, res, next) => {
+  try {
+    const { username } = req.params;
+    if (!username) {
+      res.status(400).json({ error: "username is required" });
+      return;
+    }
+
+    const normalizedUser = username.toLowerCase().trim();
+
+    const pipeline = await LeadPipeline.findOne({ username: normalizedUser });
+    if (!pipeline) {
+      res.status(404).json({ error: "Lead pipeline not found" });
+      return;
+    }
+
+    const qualification = await LeadQualification.findOne({ username: normalizedUser });
+    const userIntelligence = await UserIntelligence.findOne({ username: normalizedUser });
+    const activity = await LeadActivity.find({ username: normalizedUser }).sort({ createdAt: -1 });
+
+    // Fetch Lead profile & Following list overlap
+    const lead = await Lead.findOne({ username: new RegExp(`^${normalizedUser}$`, "i") });
+    let matchedFollowings: string[] = [];
+    if (lead && lead.followingHandles && lead.followingHandles.length > 0) {
+      const activeSeeds = await SeedInfluencer.find({
+        username: { $in: lead.followingHandles.map((h: string) => h.toLowerCase().trim()) },
+        isActive: true
+      });
+      matchedFollowings = activeSeeds.map((s: any) => s.username);
+    }
+
+    res.json({
+      pipeline,
+      qualification,
+      userIntelligence,
+      activity,
+      lead,
+      matchedFollowings
     });
   } catch (error) {
     next(error);

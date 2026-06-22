@@ -183,7 +183,7 @@ export default function App() {
   const [devSuccessMessage, setDevSuccessMessage] = useState<string | null>(null);
 
   // Logs Tab State
-  const [selectedWorker, setSelectedWorker] = useState<"scraper" | "discovery" | "analysis" | "embedding" | "intelligence" | "qualification">("scraper");
+  const [selectedWorker, setSelectedWorker] = useState<"scraper" | "influencer-discovery" | "comment-scraper" | "comment-analyzer" | "analysis" | "embedding" | "intelligence" | "qualification">("scraper");
   const [workerLogs, setWorkerLogs] = useState<any[]>([]);
   const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
   const [logsSearchTerm, setLogsSearchTerm] = useState("");
@@ -2078,20 +2078,52 @@ export default function App() {
                   🕸️ Scraper Worker
                 </button>
                 <button
-                  onClick={() => setSelectedWorker("discovery")}
+                  onClick={() => setSelectedWorker("influencer-discovery")}
                   style={{
                     padding: "0.4rem 1rem",
                     borderRadius: "6px",
                     border: "none",
-                    background: selectedWorker === "discovery" ? "rgba(0, 186, 255, 0.15)" : "transparent",
-                    color: selectedWorker === "discovery" ? "var(--color-accent)" : "var(--color-text-dim)",
+                    background: selectedWorker === "influencer-discovery" ? "rgba(0, 186, 255, 0.15)" : "transparent",
+                    color: selectedWorker === "influencer-discovery" ? "var(--color-accent)" : "var(--color-text-dim)",
                     cursor: "pointer",
                     fontSize: "0.85rem",
                     fontWeight: "bold",
                     transition: "all 0.2s"
                   }}
                 >
-                  🔎 Discovery Worker
+                  🎯 Influencer Discover Worker
+                </button>
+                <button
+                  onClick={() => setSelectedWorker("comment-scraper")}
+                  style={{
+                    padding: "0.4rem 1rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: selectedWorker === "comment-scraper" ? "rgba(0, 186, 255, 0.15)" : "transparent",
+                    color: selectedWorker === "comment-scraper" ? "var(--color-accent)" : "var(--color-text-dim)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    fontWeight: "bold",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  💬 Comment Scraper
+                </button>
+                <button
+                  onClick={() => setSelectedWorker("comment-analyzer")}
+                  style={{
+                    padding: "0.4rem 1rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: selectedWorker === "comment-analyzer" ? "rgba(0, 186, 255, 0.15)" : "transparent",
+                    color: selectedWorker === "comment-analyzer" ? "var(--color-accent)" : "var(--color-text-dim)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    fontWeight: "bold",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  🤖 Comment Analyzer
                 </button>
                 <button
                   onClick={() => setSelectedWorker("analysis")}

@@ -32,4 +32,9 @@ describe("calculateLeadScore", () => {
     const longCaption = "This is a caption that has more than 30 characters in total length.";
     expect(calculateLeadScore(true, 95, "seeking_help", longCaption)).toBe(100);
   });
+
+  test("adds followingBoost score directly and clamps to 100", () => {
+    expect(calculateLeadScore(false, 50, "other", "", 15)).toBe(15);
+    expect(calculateLeadScore(true, 95, "seeking_help", "This is a caption that has more than 30 characters in total length.", 25)).toBe(100);
+  });
 });

@@ -5,6 +5,10 @@ import { EMBEDDING_QUEUE_NAME, type EmbeddingJobData } from "../queues/embedding
 import { Post } from "../models/Post";
 import { PostEmbedding } from "../models/PostEmbedding";
 import { getEmbeddingProvider, getEmbeddingModelName } from "../services/ai/EmbeddingProvider";
+import { setupWorkerLogger } from "../utils/logger";
+
+setupWorkerLogger("embedding");
+
 
 // Connect to MongoDB
 try {

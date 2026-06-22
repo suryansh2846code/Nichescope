@@ -15,7 +15,11 @@
     "worker:embedding": "bun run src/workers/embeddingWorker.ts",
     "worker:monitoring": "bun run src/workers/monitoringWorker.ts",
     "worker:qualification": "bun run src/workers/leadQualificationWorker.ts",
-    "frontend": "bun --hot src/frontend/server.ts"
+    "worker:influencer-discover": "bun run src/workers/influencerDiscoveryWorker.ts",
+    "worker:comment-scrape": "bun run src/workers/commentScrapeWorker.ts",
+    "worker:comment-analyze": "bun run src/workers/commentAnalysisWorker.ts",
+    "frontend": "bun --hot src/frontend/server.ts",
+    "dev:all": "bun run run-all.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -10,6 +10,12 @@ import { LeadScoreHistory } from "../models/LeadScoreHistory";
 import { ChangeEvent } from "../models/ChangeEvent";
 import { UserMonitoring } from "../models/UserMonitoring";
 import { leadQualificationQueue, QUALIFY_LEAD_JOB_NAME } from "../queues/leadQualificationQueue";
+import { setupWorkerLogger } from "../utils/logger";
+import { Lead } from "../models/Lead";
+import { analyzeFollowingList } from "../services/following/followingAnalysisService";
+
+setupWorkerLogger("intelligence");
+
 
 // Connect to MongoDB
 try {
@@ -91,6 +97,19 @@ export async function processUserIntelligenceJob(job: {
   await job.updateProgress(50);
 
   // 4. Lead Score Calculation
+  // let score = 0;
+  // score += averagePostLeadScore * 0.5;
+  // if (leadPostCount >= 3) {
+  //   score += 20;
+  // }
+  // if (overallIntent === "seeking_help" || overallIntent === "seeking_recommendation") {
+  //   score += 15;
+  // }
+  // if (averageConfidence > 90) {
+  //   score += 15;
+  // }
+  // const finalLeadScore = Math.max(0, Math.min(100, Math.round(score)));
+
   let score = 0;
   score += averagePostLeadScore * 0.5;
   if (leadPostCount >= 3) {
@@ -102,6 +121,19 @@ export async function processUserIntelligenceJob(job: {
   if (averageConfidence > 90) {
     score += 15;
   }
+
+  let followingBoost = 0;
+  try {
+    const lead = await Lead.findOne({ username: normalizedUser });
+    if (lead && lead.followingHandles && lead.followingHandles.length > 0) {
+      const analysis = await analyzeFollowingList(lead.followingHandles, lead.niche);
+      followingBoost = analysis.followingBoost;
+    }
+  } catch (err) {
+    console.error(`Failed to calculate following boost for @${normalizedUser}:`, err);
+  }
+
+  score += followingBoost;
   const finalLeadScore = Math.max(0, Math.min(100, Math.round(score)));
 
   // 5. Generate AI User Summary

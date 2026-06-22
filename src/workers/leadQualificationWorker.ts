@@ -9,6 +9,9 @@ import { LeadQualification } from "../models/LeadQualification";
 import { getAIProvider } from "../services/ai/AIProvider";
 import { LeadPipeline } from "../models/LeadPipeline";
 import { LeadActivity } from "../models/LeadActivity";
+import { setupWorkerLogger } from "../utils/logger";
+
+setupWorkerLogger("qualification");
 
 // Connect to MongoDB
 try {

@@ -163,6 +163,12 @@ export default function App() {
   const [newInfluencerNiche, setNewInfluencerNiche] = useState("");
   const [influencerError, setInfluencerError] = useState<string | null>(null);
 
+  // Seed Influencer Leads Modal State
+  const [selectedInfluencerForLeads, setSelectedInfluencerForLeads] = useState<string | null>(null);
+  const [influencerLeadsList, setInfluencerLeadsList] = useState<any[]>([]);
+  const [influencerLeadsLoading, setInfluencerLeadsLoading] = useState(false);
+  const [influencerLeadsError, setInfluencerLeadsError] = useState<string | null>(null);
+
   // Job Tracker State
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
@@ -328,6 +334,25 @@ export default function App() {
       }
     } catch (err) {
       console.error("Error fetching influencers:", err);
+    }
+  }, []);
+
+  const fetchInfluencerLeads = useCallback(async (username: string) => {
+    setSelectedInfluencerForLeads(username);
+    setInfluencerLeadsLoading(true);
+    setInfluencerLeadsError(null);
+    setInfluencerLeadsList([]);
+    try {
+      const res = await fetch(`${API_BASE_URL}/discover/influencers/${username}/leads`);
+      if (!res.ok) {
+        throw new Error(`Failed to fetch leads for @${username}`);
+      }
+      const data = await res.json();
+      setInfluencerLeadsList(data);
+    } catch (err) {
+      setInfluencerLeadsError(err instanceof Error ? err.message : `Error fetching leads for @${username}`);
+    } finally {
+      setInfluencerLeadsLoading(false);
     }
   }, []);
 
@@ -831,9 +856,11 @@ export default function App() {
     other: "⚡ Other",
   };
 
-  const highPriorityLeads = qualifiedLeads.filter(lead => lead.recommendedAction === "Contact immediately");
-  const mediumPriorityLeads = qualifiedLeads.filter(lead => lead.recommendedAction === "Monitor");
-  const lowPriorityLeads = qualifiedLeads.filter(lead => lead.recommendedAction !== "Contact immediately" && lead.recommendedAction !== "Monitor");
+  // Group leads by buying intent score (not just recommendedAction string)
+  // High: buyingIntent > 60, Medium: > 30, Low: rest
+  const highPriorityLeads = qualifiedLeads.filter(lead => (lead.buyingIntent ?? 0) > 60);
+  const mediumPriorityLeads = qualifiedLeads.filter(lead => (lead.buyingIntent ?? 0) > 30 && (lead.buyingIntent ?? 0) <= 60);
+  const lowPriorityLeads = qualifiedLeads.filter(lead => (lead.buyingIntent ?? 0) <= 30);
 
   const renderLeadCard = (lead: any) => {
     const getUrgencyColor = (urgency: string) => {
@@ -1561,6 +1588,7 @@ export default function App() {
                       <tr>
                         <th>Username</th>
                         <th>Niche</th>
+                        <th>Qualified Leads</th>
                         <th>Status</th>
                         <th>Last Post Processed</th>
                         <th>Actions</th>
@@ -1581,6 +1609,24 @@ export default function App() {
                             }}>
                               {inf.niche}
                             </span>
+                          </td>
+                          <td>
+                            <button
+                              onClick={() => fetchInfluencerLeads(inf.username)}
+                              style={{
+                                background: inf.leadsCount > 0 ? "rgba(167, 139, 250, 0.15)" : "rgba(255, 255, 255, 0.03)",
+                                border: inf.leadsCount > 0 ? "1px solid #a78bfa" : "var(--glass-border)",
+                                color: inf.leadsCount > 0 ? "#c084fc" : "var(--color-text-dim)",
+                                padding: "0.25rem 0.6rem",
+                                borderRadius: "6px",
+                                fontSize: "0.8rem",
+                                fontWeight: "bold",
+                                cursor: "pointer",
+                                transition: "all 0.2s"
+                              }}
+                            >
+                              💡 {inf.leadsCount || 0} Leads
+                            </button>
                           </td>
                           <td>
                             <span className={`status-badge ${inf.isActive ? "status-active" : "status-failed"}`} style={{
@@ -1620,6 +1666,121 @@ export default function App() {
               )}
             </div>
           </div>
+
+          {/* Detailed Leads Panel for Selected Influencer */}
+          {selectedInfluencerForLeads && (
+            <div className="glass-card animate-fade-in" style={{ marginTop: "2rem", padding: "1.5rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+                <div>
+                  <h3 style={{ fontSize: "1.2rem", fontWeight: "bold", margin: 0, color: "#fff" }}>
+                    📥 Qualified Leads from @{selectedInfluencerForLeads}
+                  </h3>
+                  <p style={{ margin: "0.25rem 0 0 0", color: "var(--color-text-dim)", fontSize: "0.85rem" }}>
+                    Commenters who showed buying intent on posts of this influencer.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setSelectedInfluencerForLeads(null)}
+                  className="btn btn-secondary"
+                  style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
+                >
+                  Close Panel
+                </button>
+              </div>
+
+              {influencerLeadsLoading && (
+                <div style={{ textAlign: "center", padding: "2rem" }}>
+                  <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
+                  <p style={{ color: "var(--color-text-dim)" }}>Loading leads...</p>
+                </div>
+              )}
+
+              {influencerLeadsError && (
+                <div className="toast toast-error">{influencerLeadsError}</div>
+              )}
+
+              {!influencerLeadsLoading && !influencerLeadsError && influencerLeadsList.length === 0 && (
+                <div style={{ textAlign: "center", padding: "2rem", color: "var(--color-text-dim)" }}>
+                  No qualified leads found for this influencer yet. Make sure to run discovery scan.
+                </div>
+              )}
+
+              {!influencerLeadsLoading && !influencerLeadsError && influencerLeadsList.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "1rem" }}>
+                  {influencerLeadsList.map((lead, idx) => {
+                    const inCrm = crmLeads.some(cl => cl.username.toLowerCase() === lead.username.toLowerCase());
+                    return (
+                      <div key={idx} className="glass-card" style={{ padding: "1.25rem", background: "rgba(255, 255, 255, 0.02)", border: "var(--glass-border)", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontWeight: "bold", color: "#a78bfa", fontSize: "1rem" }}>@{lead.username}</span>
+                          <span style={{
+                            fontSize: "0.75rem",
+                            fontWeight: "bold",
+                            color: lead.qualification?.urgency === "high" ? "#ff4566" : lead.qualification?.urgency === "medium" ? "#ffd166" : "#00baff",
+                            background: lead.qualification?.urgency === "high" ? "rgba(255,69,102,0.15)" : lead.qualification?.urgency === "medium" ? "rgba(255,209,102,0.15)" : "rgba(0,186,255,0.15)",
+                            padding: "0.15rem 0.35rem",
+                            borderRadius: "4px"
+                          }}>
+                            {lead.qualification?.urgency?.toUpperCase() || "LOW"} URGENCY
+                          </span>
+                        </div>
+                        <p style={{ margin: 0, fontSize: "0.85rem", color: "#eee", fontStyle: "italic", background: "rgba(0,0,0,0.2)", padding: "0.5rem", borderRadius: "4px" }}>
+                          &ldquo;{lead.commentText}&rdquo;
+                        </p>
+                        {lead.qualification ? (
+                          <>
+                            <p style={{ margin: 0, fontSize: "0.85rem", color: "#eee" }}>
+                              <strong>Problem:</strong> {lead.qualification.problem}
+                            </p>
+                            <p style={{ margin: 0, fontSize: "0.85rem", color: "#eee" }}>
+                              <strong>Service:</strong> {lead.qualification.serviceNeeded}
+                            </p>
+                            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-dim)" }}>
+                              <strong>Reason:</strong> {lead.qualification.qualificationReason}
+                            </p>
+                          </>
+                        ) : (
+                          <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-dim)", fontStyle: "italic" }}>
+                            Lead profile/following list scrape in queue...
+                          </p>
+                        )}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
+                          <span style={{ fontSize: "0.75rem", color: "var(--color-text-dim)" }}>
+                            🎯 Intent: {lead.intentScore}%
+                          </span>
+                          <div style={{ display: "flex", gap: "0.5rem" }}>
+                            {lead.qualification && (
+                              <button
+                                onClick={() => {
+                                  setActiveTab("qualified");
+                                  fetchInboxLeadDetails(lead.username);
+                                }}
+                                className="btn btn-secondary"
+                                style={{ padding: "0.25rem 0.5rem", fontSize: "0.7rem", minWidth: "auto", margin: 0 }}
+                              >
+                                View Details
+                              </button>
+                            )}
+                            {inCrm ? (
+                              <span style={{ color: "var(--color-success)", fontWeight: "bold", fontSize: "0.75rem", alignSelf: "center" }}>✅ In CRM</span>
+                            ) : (
+                              <button
+                                onClick={() => handleAddToCrm(lead.username)}
+                                className="btn btn-primary"
+                                style={{ padding: "0.25rem 0.5rem", fontSize: "0.7rem", minWidth: "auto", margin: 0 }}
+                              >
+                                Add to CRM
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1757,6 +1918,23 @@ export default function App() {
           )}
 
           {inboxError && <div className="toast toast-error">{inboxError}</div>}
+
+          {/* Summary Stats Bar */}
+          {!inboxLoading && !inboxError && qualifiedLeads.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem", marginBottom: "1.5rem" }}>
+              {[
+                { label: "Total Leads", value: qualifiedLeads.length, color: "#a78bfa", bg: "rgba(167, 139, 250, 0.1)" },
+                { label: "🔥 Hot (>60% intent)", value: highPriorityLeads.length, color: "#ff4566", bg: "rgba(255, 69, 102, 0.1)" },
+                { label: "⚡ Warm (30–60%)", value: mediumPriorityLeads.length, color: "#ffd166", bg: "rgba(255, 209, 102, 0.1)" },
+                { label: "🔵 Watchlist (<30%)", value: lowPriorityLeads.length, color: "#00baff", bg: "rgba(0, 186, 255, 0.1)" },
+              ].map(stat => (
+                <div key={stat.label} style={{ background: stat.bg, border: `1px solid ${stat.color}30`, borderRadius: "10px", padding: "1rem", textAlign: "center" }}>
+                  <div style={{ fontSize: "1.8rem", fontWeight: "bold", color: stat.color }}>{stat.value}</div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--color-text-dim)", marginTop: "0.25rem" }}>{stat.label}</div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* CRM Kanban Columns / Priority groupings */}
           {!inboxLoading && !inboxError && (

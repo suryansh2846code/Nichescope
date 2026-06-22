@@ -6,6 +6,9 @@ import { Router } from "express";
 // } from "../queues/discoveryQueue";
 // import { HashtagDiscovery } from "../models/HashtagDiscovery";
 import { SeedInfluencer } from "../models/SeedInfluencer";
+import { Post } from "../models/Post";
+import { CommentAnalysis } from "../models/CommentAnalysis";
+import { LeadQualification } from "../models/LeadQualification";
 import {
   influencerDiscoveryQueue,
   INFLUENCER_DISCOVER_JOB_NAME,
@@ -14,70 +17,36 @@ import {
 const router = Router();
 
 // router.post("/hashtag", async (req, res, next) => {
-//   try {
-//     console.log("[DISCOVERY REQUEST]", req.body);
-//     const { hashtag } = req.body as Partial<DiscoveryJobData>;
-// 
-//     if (!hashtag || typeof hashtag !== "string") {
-//       res.status(400).json({ error: "hashtag is required" });
-//       return;
-//     }
-// 
-//     const cleanHashtag = hashtag.replace(/^#/, "").trim().toLowerCase();
-// 
-//     // Drain discovery queue to avoid queue backlog
-//     await discoveryQueue.drain(true);
-// 
-//     const payload = { hashtag: cleanHashtag };
-//     console.log("[QUEUE PAYLOAD]", payload);
-// 
-//     const jobId = `discover-${cleanHashtag}-${Date.now()}`;
-// 
-//     const job = await discoveryQueue.add(
-//       DISCOVER_HASHTAG_JOB_NAME,
-//       payload,
-//       { jobId }
-//     );
-// 
-//     res.status(202).json({
-//       jobId: job.id,
-//       status: "queued",
-//     });
-//   } catch (error) {
-//     next(error);
-//   }
-// });
-// 
-// router.get("/hashtag/:hashtag", async (req, res, next) => {
-//   try {
-//     const { hashtag } = req.params;
-// 
-//     if (!hashtag) {
-//       res.status(400).json({ error: "hashtag is required" });
-//       return;
-//     }
-// 
-//     const keywords = hashtag
-//       .split(/[\s,+#]+/)
-//       .map(k => k.trim().toLowerCase())
-//       .filter(Boolean);
-// 
-//     const discoveries = await HashtagDiscovery.find(
-//       { hashtag: { $in: keywords } },
-//       { username: 1, _id: 0 }
-//     );
-// 
-//     res.json(discoveries);
-//   } catch (error) {
-//     next(error);
-//   }
-// });
+//   ... (rest of the unused router.post and router.get)
+// })
 
 // GET /discover/influencers
 router.get("/influencers", async (req, res, next) => {
   try {
     const influencers = await SeedInfluencer.find().sort({ createdAt: -1 });
-    res.json(influencers);
+    
+    const enrichedInfluencers = await Promise.all(
+      influencers.map(async (inf) => {
+        const posts = await Post.find({ username: new RegExp(`^${inf.username}$`, "i") });
+        const postUrls = posts.map(p => p.postUrl).filter(Boolean);
+        
+        let leadsCount = 0;
+        if (postUrls.length > 0) {
+          const uniqueCommenters = await CommentAnalysis.distinct("username", {
+            postUrl: { $in: postUrls },
+            isLead: true
+          });
+          leadsCount = uniqueCommenters.length;
+        }
+        
+        return {
+          ...inf.toObject(),
+          leadsCount
+        };
+      })
+    );
+
+    res.json(enrichedInfluencers);
   } catch (error) {
     next(error);
   }
@@ -156,6 +125,51 @@ router.post("/influencers/trigger", async (req, res, next) => {
       status: "queued",
       message: "Seed influencer post discovery triggered successfully"
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /discover/influencers/:username/leads
+router.get("/influencers/:username/leads", async (req, res, next) => {
+  try {
+    const { username } = req.params;
+    const cleanUsername = username.replace(/^@/, "").trim().toLowerCase();
+    
+    const posts = await Post.find({ username: new RegExp(`^${cleanUsername}$`, "i") });
+    const postUrls = posts.map(p => p.postUrl).filter(Boolean);
+    
+    if (postUrls.length === 0) {
+      res.json([]);
+      return;
+    }
+    
+    // Find all comment analyses on this influencer's posts that are leads
+    const comments = await CommentAnalysis.find({
+      postUrl: { $in: postUrls },
+      isLead: true
+    }).sort({ analyzedAt: -1 });
+    
+    // Map comments to their corresponding LeadQualification data
+    const leadsData = await Promise.all(
+      comments.map(async (comment) => {
+        const qualification = await LeadQualification.findOne({
+          username: comment.username.toLowerCase()
+        });
+        
+        return {
+          username: comment.username,
+          commentText: comment.commentText,
+          postUrl: comment.postUrl,
+          intentScore: comment.intentScore,
+          niche: comment.niche,
+          analyzedAt: comment.analyzedAt,
+          qualification: qualification || null
+        };
+      })
+    );
+    
+    res.json(leadsData);
   } catch (error) {
     next(error);
   }

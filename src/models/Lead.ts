@@ -12,6 +12,7 @@ export interface LeadAttrs {
   niche: string;
   scrapedAt: Date;
   rawData: unknown;
+  followingHandles?: string[];
 }
 
 const leadSchema = new Schema(
@@ -68,6 +69,10 @@ const leadSchema = new Schema(
     rawData: {
       type: Schema.Types.Mixed,
       default: {},
+    },
+    followingHandles: {
+      type: [String],
+      default: [],
     },
   },
   {

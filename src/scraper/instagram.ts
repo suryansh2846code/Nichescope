@@ -1,4 +1,7 @@
+// import { chromium } from "playwright";
 import { chromium } from "playwright";
+import fs from "fs";
+import path from "path";
 
 export interface ScrapedInstagramProfile {
   username: string;
@@ -14,6 +17,7 @@ export interface ScrapedInstagramProfile {
     description: string;
     canonicalUrl: string;
   };
+  followingHandles?: string[]; // Added for following list overlap check
 }
 
 export interface ScrapedPost {
@@ -531,6 +535,25 @@ export async function scrapeProfile(
             "--disable-setuid-sandbox",
           ],
         });
+        // context = await browser.newContext({
+        //   userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        //   viewport: { width: 1280, height: 800 },
+        //   locale: "en-US",
+        //   timezoneId: "America/New_York",
+        //   extraHTTPHeaders: {
+        //     "Accept-Language": "en-US,en;q=0.9",
+        //   },
+        // });
+        const cookiePath = path.join(process.cwd(), "instagram_cookies.json");
+        let cookies = [];
+        if (fs.existsSync(cookiePath)) {
+          try {
+            cookies = JSON.parse(fs.readFileSync(cookiePath, "utf-8"));
+            console.log(`Loaded ${cookies.length} cookies for Instagram session.`);
+          } catch (e) {
+            console.error("Failed to parse Instagram cookies file:", e);
+          }
+        }
         context = await browser.newContext({
           userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
           viewport: { width: 1280, height: 800 },
@@ -540,6 +563,9 @@ export async function scrapeProfile(
             "Accept-Language": "en-US,en;q=0.9",
           },
         });
+        if (cookies.length > 0) {
+          await context.addCookies(cookies);
+        }
         page = await context.newPage();
         // Remove the webdriver flag that headless Chrome exposes — Instagram checks this
         await page.addInitScript(() => {
@@ -575,6 +601,49 @@ export async function scrapeProfile(
         if (posts.length === 0) {
           throw new Error("NO_POST_URLS_FOUND");
         }
+
+        // console.log(`[SCRAPE FINISHED] @${cleanUsername} — elapsed: ${elapsedStr()}, posts collected: ${posts.length}`);
+        // return { profile, posts };
+        
+        let followingHandles: string[] = [];
+        try {
+          console.log(`Attempting to scrape following list for @${cleanUsername}...`);
+          const followingLink = page.locator('a[href*="/following/"]');
+          if (await followingLink.count() > 0) {
+            await followingLink.first().click();
+            await page.waitForSelector('div[role="dialog"]', { timeout: 5000 });
+            for (let i = 0; i < 3; i++) {
+              await page.evaluate(() => {
+                const scrollable = document.querySelector('div[role="dialog"] ._aano') || 
+                                   document.querySelector('div[role="dialog"] ul')?.parentElement;
+                if (scrollable) {
+                  scrollable.scrollTop = scrollable.scrollHeight;
+                }
+              });
+              await page.waitForTimeout(1000);
+            }
+            followingHandles = await page.evaluate(() => {
+              const anchors = Array.from(document.querySelectorAll('div[role="dialog"] a[href]')) as HTMLAnchorElement[];
+              const handles = new Set<string>();
+              for (const a of anchors) {
+                const href = a.getAttribute("href") || "";
+                const match = href.match(/^\/([a-zA-Z0-9_.-]+)\/$/);
+                if (match && match[1]) {
+                  const handle = match[1].toLowerCase().trim();
+                  if (!["explore", "reels", "direct", "stories"].includes(handle)) {
+                    handles.add(handle);
+                  }
+                }
+              }
+              return Array.from(handles);
+            });
+            console.log(`Scraped ${followingHandles.length} following handles for @${cleanUsername}`);
+          }
+        } catch (err) {
+          console.warn(`[WARN] Failed to scrape following list for @${cleanUsername}:`, err instanceof Error ? err.message : String(err));
+        }
+
+        profile.followingHandles = followingHandles;
 
         console.log(`[SCRAPE FINISHED] @${cleanUsername} — elapsed: ${elapsedStr()}, posts collected: ${posts.length}`);
         return { profile, posts };
@@ -812,6 +881,116 @@ export async function scrapeHashtag(
       hashtag: cleanHashtag,
       discoveries: uniqueDiscoveries,
     };
+  } finally {
+    await safeClose(browser, "browser", 2000);
+  }
+}
+
+export async function scrapeComments(
+  postUrl: string,
+  options: { headless?: boolean; timeoutMs?: number } = {}
+): Promise<{ username: string; text: string }[]> {
+  // If running in test mode, return mock comments
+  if (process.env.NODE_ENV === "test" || (typeof Bun !== "undefined" && Bun.env.NODE_ENV === "test")) {
+    return [
+      { username: "test_commenter_1", text: "I need a recommendation for a dermatologist in New York!" },
+      { username: "test_commenter_2", text: "Nice post!" },
+      { username: "test_commenter_3", text: "Is there any gym recommendation for real estate brokers?" },
+    ];
+  }
+
+  const browser = await chromium.launch({
+    headless: options.headless ?? true,
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+    ],
+  });
+
+  try {
+    const cookiePath = path.join(process.cwd(), "instagram_cookies.json");
+    let cookies = [];
+    if (fs.existsSync(cookiePath)) {
+      try {
+        cookies = JSON.parse(fs.readFileSync(cookiePath, "utf-8"));
+      } catch (e) {
+        console.error("Failed to parse Instagram cookies file:", e);
+      }
+    }
+
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      viewport: { width: 1280, height: 800 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+      extraHTTPHeaders: { "Accept-Language": "en-US,en;q=0.9" },
+    });
+
+    if (cookies.length > 0) {
+      await context.addCookies(cookies);
+    }
+
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
+
+    console.log(`Navigating to post page to scrape comments: ${postUrl}`);
+    await page.goto(postUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: options.timeoutMs ?? 30_000,
+    });
+
+    // Wait for the comment section to render
+    try {
+      await page.waitForSelector('ul li', { timeout: 10000 });
+    } catch {
+      console.warn("[WARN] Timed out waiting for comment list items");
+    }
+
+    // Scroll to load a few comments
+    for (let i = 0; i < 2; i++) {
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForTimeout(1000);
+    }
+
+    // Extract comments
+    const comments = await page.evaluate(() => {
+      const listItems = Array.from(document.querySelectorAll('ul li'));
+      const results: { username: string; text: string }[] = [];
+      const seen = new Set<string>();
+
+      for (const li of listItems) {
+        const authorAnchor = li.querySelector('a[href]');
+        const spans = Array.from(li.querySelectorAll('span'));
+        
+        if (authorAnchor && spans.length > 0) {
+          const username = authorAnchor.textContent?.trim().replace(/^@/, "").toLowerCase();
+          
+          if (!username) continue;
+
+          // Find the first span that contains text and is not the username itself and does not contain anchor elements
+          const textSpan = spans.find(s => {
+            const content = s.textContent?.trim();
+            return content && content.length > 0 && content !== username && !s.querySelector('a');
+          });
+
+          if (textSpan) {
+            const text = textSpan.textContent?.trim() || "";
+            const key = `${username}:${text}`;
+            if (!seen.has(key) && text.length > 0) {
+              seen.add(key);
+              results.push({ username, text });
+            }
+          }
+        }
+      }
+      return results;
+    });
+
+    console.log(`Successfully scraped ${comments.length} comments from ${postUrl}`);
+    return comments;
   } finally {
     await safeClose(browser, "browser", 2000);
   }

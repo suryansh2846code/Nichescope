@@ -99,7 +99,8 @@ interface LeadPipelineResult {
 
 export default function App() {
   // Navigation
-  const [activeTab, setActiveTab] = useState<"discovery" | "hashtag-discovery" | "qualified" | "crm" | "settings" | "developer" | "logs">("discovery");
+  // const [activeTab, setActiveTab] = useState<"discovery" | "hashtag-discovery" | "qualified" | "crm" | "settings" | "developer" | "logs">("discovery");
+  const [activeTab, setActiveTab] = useState<"discovery" | "seed-influencers" | "qualified" | "crm" | "settings" | "developer" | "logs">("discovery");
 
   // Lead Inbox Tab State
   const [qualifiedLeads, setQualifiedLeads] = useState<any[]>([]);
@@ -149,12 +150,18 @@ export default function App() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  // Hashtag Discovery State
-  const [hashtagInput, setHashtagInput] = useState("");
-  const [activeDiscoveryKeyword, setActiveDiscoveryKeyword] = useState("");
-  const [submittingHashtag, setSubmittingHashtag] = useState(false);
-  const [hashtagError, setHashtagError] = useState<string | null>(null);
-  const [discoveredUsers, setDiscoveredUsers] = useState<any[]>([]);
+  // // Hashtag Discovery State
+  // const [hashtagInput, setHashtagInput] = useState("");
+  // const [activeDiscoveryKeyword, setActiveDiscoveryKeyword] = useState("");
+  // const [submittingHashtag, setSubmittingHashtag] = useState(false);
+  // const [hashtagError, setHashtagError] = useState<string | null>(null);
+  // const [discoveredUsers, setDiscoveredUsers] = useState<any[]>([]);
+  
+  // Seed Influencers State
+  const [influencers, setInfluencers] = useState<any[]>([]);
+  const [newInfluencerUsername, setNewInfluencerUsername] = useState("");
+  const [newInfluencerNiche, setNewInfluencerNiche] = useState("");
+  const [influencerError, setInfluencerError] = useState<string | null>(null);
 
   // Job Tracker State
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -176,7 +183,7 @@ export default function App() {
   const [devSuccessMessage, setDevSuccessMessage] = useState<string | null>(null);
 
   // Logs Tab State
-  const [selectedWorker, setSelectedWorker] = useState<"scraper" | "discovery" | "analysis">("scraper");
+  const [selectedWorker, setSelectedWorker] = useState<"scraper" | "discovery" | "analysis" | "embedding" | "intelligence" | "qualification">("scraper");
   const [workerLogs, setWorkerLogs] = useState<any[]>([]);
   const [logsAutoRefresh, setLogsAutoRefresh] = useState(true);
   const [logsSearchTerm, setLogsSearchTerm] = useState("");
@@ -246,69 +253,152 @@ export default function App() {
     fetchSearchResults(searchQuery);
   };
 
-  const fetchDiscoveredUsers = async (hashtag: string) => {
+  // const fetchDiscoveredUsers = async (hashtag: string) => {
+  //   try {
+  //     const res = await fetch(`${API_BASE_URL}/discover/hashtag/${encodeURIComponent(hashtag)}`);
+  //     if (!res.ok) throw new Error("Failed to fetch discovered users");
+  //     const discoveredList = await res.json() as { username: string }[];
+  // 
+  //     const qualRes = await fetch(`${API_BASE_URL}/leads/inbox`);
+  //     let inboxList: any[] = [];
+  //     if (qualRes.ok) {
+  //       inboxList = await qualRes.json();
+  //     }
+  // 
+  //     const mapped = discoveredList.map(disc => {
+  //       const username = disc.username.toLowerCase();
+  //       const q = inboxList.find(i => i.username.toLowerCase() === username);
+  //       return {
+  //         username: disc.username,
+  //         problem: q?.problem || "Processing...",
+  //         serviceNeeded: q?.serviceNeeded || "Processing...",
+  //         buyingIntent: q?.buyingIntent || 0,
+  //         leadScore: q?.leadScore || 0,
+  //         recommendedAction: q?.recommendedAction || "Analyzing..."
+  //       };
+  //     });
+  //     setDiscoveredUsers(mapped);
+  //   } catch (err) {
+  //     console.error(err);
+  //   }
+  // };
+  // 
+  // const handleHashtagDiscoverySubmit = async (e: React.FormEvent) => {
+  //   e.preventDefault();
+  //   setHashtagError(null);
+  //   const rawInput = hashtagInput.trim();
+  //   if (!rawInput) {
+  //     setHashtagError("Hashtag/Keywords are required");
+  //     return;
+  //   }
+  //   console.log("[UI INPUT]", rawInput);
+  //   setActiveDiscoveryKeyword(rawInput);
+  //   setSubmittingHashtag(true);
+  //   try {
+  //     const payload = { hashtag: rawInput };
+  //     console.log("[UI SUBMIT]", payload);
+  //     const res = await fetch(`${API_BASE_URL}/discover/hashtag`, {
+  //       method: "POST",
+  //       headers: { "Content-Type": "application/json" },
+  //       body: JSON.stringify(payload)
+  //     });
+  //     if (!res.ok) {
+  //       const errData = await res.json();
+  //       throw new Error(errData.error || `Error starting discovery: ${res.statusText}`);
+  //     }
+  //     const data = await res.json();
+  //     console.log("[UI JOB ID]", data.jobId);
+  //     setActiveJobId(data.jobId);
+  //     setTimeout(() => {
+  //       fetchDiscoveredUsers(rawInput);
+  //     }, 3000);
+  //   } catch (err) {
+  //     setHashtagError(err instanceof Error ? err.message : "Failed to trigger keyword discovery");
+  //   } finally {
+  //     setSubmittingHashtag(false);
+  //   }
+  // };
+
+  const fetchInfluencers = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/discover/hashtag/${encodeURIComponent(hashtag)}`);
-      if (!res.ok) throw new Error("Failed to fetch discovered users");
-      const discoveredList = await res.json() as { username: string }[];
-
-      const qualRes = await fetch(`${API_BASE_URL}/leads/inbox`);
-      let inboxList: any[] = [];
-      if (qualRes.ok) {
-        inboxList = await qualRes.json();
+      const res = await fetch(`${API_BASE_URL}/discover/influencers`);
+      if (res.ok) {
+        const data = await res.json();
+        setInfluencers(data);
       }
-
-      const mapped = discoveredList.map(disc => {
-        const username = disc.username.toLowerCase();
-        const q = inboxList.find(i => i.username.toLowerCase() === username);
-        return {
-          username: disc.username,
-          problem: q?.problem || "Processing...",
-          serviceNeeded: q?.serviceNeeded || "Processing...",
-          buyingIntent: q?.buyingIntent || 0,
-          leadScore: q?.leadScore || 0,
-          recommendedAction: q?.recommendedAction || "Analyzing..."
-        };
-      });
-      setDiscoveredUsers(mapped);
     } catch (err) {
-      console.error(err);
+      console.error("Error fetching influencers:", err);
+    }
+  }, []);
+
+  const handleAddInfluencer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newInfluencerUsername.trim() || !newInfluencerNiche.trim()) {
+      setInfluencerError("Username and niche are required");
+      return;
+    }
+    setInfluencerError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/discover/influencers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: newInfluencerUsername.trim(),
+          niche: newInfluencerNiche.trim()
+        })
+      });
+      if (res.ok) {
+        setNewInfluencerUsername("");
+        setNewInfluencerNiche("");
+        fetchInfluencers();
+      } else {
+        const err = await res.json();
+        setInfluencerError(err.error || "Failed to add influencer");
+      }
+    } catch (err) {
+      setInfluencerError("Network error while adding influencer");
     }
   };
 
-  const handleHashtagDiscoverySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setHashtagError(null);
-    const rawInput = hashtagInput.trim();
-    if (!rawInput) {
-      setHashtagError("Hashtag/Keywords are required");
-      return;
-    }
-    console.log("[UI INPUT]", rawInput);
-    setActiveDiscoveryKeyword(rawInput);
-    setSubmittingHashtag(true);
+  const handleToggleInfluencer = async (username: string) => {
     try {
-      const payload = { hashtag: rawInput };
-      console.log("[UI SUBMIT]", payload);
-      const res = await fetch(`${API_BASE_URL}/discover/hashtag`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+      const res = await fetch(`${API_BASE_URL}/discover/influencers/${username}/toggle`, {
+        method: "PATCH"
       });
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || `Error starting discovery: ${res.statusText}`);
+      if (res.ok) {
+        fetchInfluencers();
       }
-      const data = await res.json();
-      console.log("[UI JOB ID]", data.jobId);
-      setActiveJobId(data.jobId);
-      setTimeout(() => {
-        fetchDiscoveredUsers(rawInput);
-      }, 3000);
     } catch (err) {
-      setHashtagError(err instanceof Error ? err.message : "Failed to trigger keyword discovery");
-    } finally {
-      setSubmittingHashtag(false);
+      console.error("Error toggling influencer:", err);
+    }
+  };
+
+  const handleDeleteInfluencer = async (username: string) => {
+    if (!confirm(`Are you sure you want to delete @${username} from seed list?`)) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/discover/influencers/${username}`, {
+        method: "DELETE"
+      });
+      if (res.ok) {
+        fetchInfluencers();
+      }
+    } catch (err) {
+      console.error("Error deleting influencer:", err);
+    }
+  };
+
+  const handleTriggerInfluencerScan = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/discover/influencers/trigger`, {
+        method: "POST"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setActiveJobId(data.jobId);
+        alert("Manually triggered seed influencer post discovery pipeline!");
+      }
+    } catch (err) {
+      console.error("Error triggering influencer scan:", err);
     }
   };
 
@@ -651,18 +741,22 @@ export default function App() {
   }, [activeTab, fetchMonitoringData]);
 
   useEffect(() => {
-    if (activeTab !== "hashtag-discovery") return;
+    // if (activeTab !== "hashtag-discovery") return;
+    if (activeTab !== "seed-influencers") return;
 
+    fetchInfluencers();
     fetchAllJobs();
     fetchQueueStats();
     const intervalStatsId = setInterval(fetchQueueStats, 2000);
     const intervalJobsId = setInterval(fetchAllJobs, 3000);
+    const intervalInfluencersId = setInterval(fetchInfluencers, 5000);
 
     return () => {
       clearInterval(intervalStatsId);
       clearInterval(intervalJobsId);
+      clearInterval(intervalInfluencersId);
     };
-  }, [activeTab, fetchAllJobs, fetchQueueStats]);
+  }, [activeTab, fetchAllJobs, fetchQueueStats, fetchInfluencers]);
 
   // Poll job status
   useEffect(() => {
@@ -682,9 +776,9 @@ export default function App() {
         if (data.state === "completed" || data.state === "failed") {
           clearInterval(intervalId);
           setActiveJobId(null);
-          if (activeDiscoveryKeyword) {
-            fetchDiscoveredUsers(activeDiscoveryKeyword);
-          }
+          // if (activeDiscoveryKeyword) {
+          //   fetchDiscoveredUsers(activeDiscoveryKeyword);
+          // }
           // Clear the job card after 5s so the dashboard doesn't stay frozen on last state
           setTimeout(() => setJob(null), 5000);
         }
@@ -699,7 +793,7 @@ export default function App() {
     intervalId = setInterval(pollJob, 2000);
 
     return () => clearInterval(intervalId);
-  }, [activeJobId, activeDiscoveryKeyword]);
+  }, [activeJobId]);
 
   // Poll worker logs
   useEffect(() => {
@@ -883,11 +977,17 @@ export default function App() {
         >
           🔍 Semantic Search
         </button>
-        <button
+        {/* <button
           className={`tab-btn ${activeTab === "hashtag-discovery" ? "active" : ""}`}
           onClick={() => setActiveTab("hashtag-discovery")}
         >
           🏷️ Hashtag Discovery
+        </button> */}
+        <button
+          className={`tab-btn ${activeTab === "seed-influencers" ? "active" : ""}`}
+          onClick={() => setActiveTab("seed-influencers")}
+        >
+          🎯 Seed Influencers
         </button>
         <button
           className={`tab-btn ${activeTab === "qualified" ? "active" : ""}`}
@@ -1086,10 +1186,10 @@ export default function App() {
         </div>
       )}
 
-      {activeTab === "hashtag-discovery" && (
+      {/*
+      activeTab === "hashtag-discovery" && (
         <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "2rem", alignItems: "start" }}>
-            {/* Keyword control form */}
             <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
               <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>🏷️ Trigger Hashtag Scraper Pipeline</h3>
               <form onSubmit={handleHashtagDiscoverySubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -1121,7 +1221,6 @@ export default function App() {
               </form>
               {hashtagError && <div className="toast toast-error">{hashtagError}</div>}
 
-              {/* Job tracker if active */}
               {(activeJobId || job || jobError) && (
                 <div className="glass-card" style={{ padding: "1rem", marginTop: "1rem", background: "rgba(0,0,0,0.2)" }}>
                   <h4 style={{ color: "#fff", fontSize: "0.9rem", marginBottom: "0.5rem" }}>⚙️ Active Scrape Job</h4>
@@ -1181,7 +1280,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Keyword Discovered users */}
             <div className="glass-card card-table">
               <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>Discovered Accounts via #{activeDiscoveryKeyword || "None"}</h3>
               {discoveredUsers.length === 0 ? (
@@ -1231,12 +1329,7 @@ export default function App() {
               )}
             </div>
           </div>
-
-          {/* Job Pipeline Status Monitor */}
-          <div className="glass-card card-table" style={{ marginTop: "2rem" }}>
-            <h3 className="card-title" style={{ fontSize: "1.3rem", margin: 0, marginBottom: "1rem" }}>⚙️ Jobs Pipeline Monitor</h3>
-
-            {/* Summary counters grid */}
+            // Summary counters grid
             <div style={{
               display: "grid",
               gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
@@ -1385,6 +1478,147 @@ export default function App() {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      ) */}
+
+      {activeTab === "seed-influencers" && (
+        <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "2rem", alignItems: "start" }}>
+            <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+              <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>🎯 Manage Seed Influencers</h3>
+              <form onSubmit={handleAddInfluencer} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div className="input-group" style={{ margin: 0 }}>
+                  <label>Instagram Username</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. janesmith_fitness"
+                    value={newInfluencerUsername}
+                    onChange={(e) => setNewInfluencerUsername(e.target.value)}
+                    className="input-field"
+                    style={{
+                      background: "rgba(255, 255, 255, 0.03)",
+                      border: "var(--glass-border)",
+                      borderRadius: "8px",
+                      color: "#fff",
+                      padding: "0.75rem",
+                      outline: "none"
+                    }}
+                  />
+                </div>
+                <div className="input-group" style={{ margin: 0 }}>
+                  <label>Target Niche</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. fitness, real_estate"
+                    value={newInfluencerNiche}
+                    onChange={(e) => setNewInfluencerNiche(e.target.value)}
+                    className="input-field"
+                    style={{
+                      background: "rgba(255, 255, 255, 0.03)",
+                      border: "var(--glass-border)",
+                      borderRadius: "8px",
+                      color: "#fff",
+                      padding: "0.75rem",
+                      outline: "none"
+                    }}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                >
+                  Add Seed Influencer
+                </button>
+              </form>
+              {influencerError && <div className="toast toast-error">{influencerError}</div>}
+
+              <div className="glass-card" style={{ padding: "1rem", marginTop: "1rem", background: "rgba(0,0,0,0.2)" }}>
+                <h4 style={{ color: "#fff", fontSize: "0.9rem", marginBottom: "0.5rem" }}>⚙️ Control Center</h4>
+                <p style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "1rem" }}>
+                  Trigger a manual scan of all active seed influencers. This checks their 5 most recent posts for new comments to scrape and analyze.
+                </p>
+                <button
+                  onClick={handleTriggerInfluencerScan}
+                  className="btn btn-secondary"
+                  style={{ width: "100%" }}
+                >
+                  🚀 Run Discovery Scan Now
+                </button>
+              </div>
+            </div>
+
+            <div className="glass-card card-table">
+              <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>Seed Influencer Registry</h3>
+              {influencers.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "3rem", color: "var(--color-text-dim)" }}>
+                  No seed influencers registered. Add your first seed influencer to start discovery.
+                </div>
+              ) : (
+                <div className="table-responsive">
+                  <table className="leads-table">
+                    <thead>
+                      <tr>
+                        <th>Username</th>
+                        <th>Niche</th>
+                        <th>Status</th>
+                        <th>Last Post Processed</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {influencers.map((inf, idx) => (
+                        <tr key={idx} className="lead-row">
+                          <td style={{ fontWeight: "bold" }}>@{inf.username}</td>
+                          <td>
+                            <span style={{
+                              background: "rgba(0, 186, 255, 0.1)",
+                              color: "#00baff",
+                              padding: "0.2rem 0.5rem",
+                              borderRadius: "4px",
+                              fontSize: "0.75rem",
+                              fontWeight: "bold"
+                            }}>
+                              {inf.niche}
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`status-badge ${inf.isActive ? "status-active" : "status-failed"}`} style={{
+                              background: inf.isActive ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)",
+                              color: inf.isActive ? "#22c55e" : "#ef4444",
+                              borderColor: inf.isActive ? "#22c55e" : "#ef4444"
+                            }}>
+                              {inf.isActive ? "Active" : "Paused"}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>
+                            {inf.lastProcessedPostId || "None"}
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", gap: "0.5rem" }}>
+                              <button
+                                onClick={() => handleToggleInfluencer(inf.username)}
+                                className="btn btn-secondary"
+                                style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
+                              >
+                                {inf.isActive ? "Pause" : "Activate"}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteInfluencer(inf.username)}
+                                className="btn btn-secondary"
+                                style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#ff4566", borderColor: "rgba(255,69,102,0.3)" }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1875,6 +2109,54 @@ export default function App() {
                 >
                   🧠 Analyze Worker
                 </button>
+                <button
+                  onClick={() => setSelectedWorker("embedding")}
+                  style={{
+                    padding: "0.4rem 1rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: selectedWorker === "embedding" ? "rgba(0, 186, 255, 0.15)" : "transparent",
+                    color: selectedWorker === "embedding" ? "var(--color-accent)" : "var(--color-text-dim)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    fontWeight: "bold",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  🧬 Embedding Worker
+                </button>
+                <button
+                  onClick={() => setSelectedWorker("intelligence")}
+                  style={{
+                    padding: "0.4rem 1rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: selectedWorker === "intelligence" ? "rgba(0, 186, 255, 0.15)" : "transparent",
+                    color: selectedWorker === "intelligence" ? "var(--color-accent)" : "var(--color-text-dim)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    fontWeight: "bold",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  💡 Intel Worker
+                </button>
+                <button
+                  onClick={() => setSelectedWorker("qualification")}
+                  style={{
+                    padding: "0.4rem 1rem",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: selectedWorker === "qualification" ? "rgba(0, 186, 255, 0.15)" : "transparent",
+                    color: selectedWorker === "qualification" ? "var(--color-accent)" : "var(--color-text-dim)",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    fontWeight: "bold",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  🏆 Qualify Worker
+                </button>
               </div>
 
               <div>
@@ -2213,9 +2495,33 @@ export default function App() {
                           return (
                             <tr key={j.id} className="lead-row" style={{ fontSize: "0.8rem" }}>
                               <td>
-                                <strong style={{ color: "#fff" }}>
-                                  {j.queue === "discovery" ? `#${j.data?.hashtag}` : `@${j.data?.username}`}
-                                </strong>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                                  <strong style={{ color: "#fff" }}>
+                                    {(() => {
+                                      if (j.queue === "discovery") return `#${j.data?.hashtag || "unknown"}`;
+                                      if (j.queue === "influencer-discovery") return "All Active Seeds";
+                                      if (j.queue === "comment-scrape") {
+                                        const url = j.data?.postUrl || "";
+                                        const match = url.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
+                                        return match ? `Post/Reel: ${match[1]}` : "Post URL";
+                                      }
+                                      return `@${j.data?.username || "unknown"}`;
+                                    })()}
+                                  </strong>
+                                  <div style={{
+                                    alignSelf: "flex-start",
+                                    fontSize: "0.65rem",
+                                    background: "rgba(255,255,255,0.06)",
+                                    border: "var(--glass-border)",
+                                    padding: "0.1rem 0.3rem",
+                                    borderRadius: "4px",
+                                    color: "var(--color-text-dim)",
+                                    textTransform: "capitalize",
+                                    fontWeight: "bold"
+                                  }}>
+                                    {j.queue}
+                                  </div>
+                                </div>
                                 {j.state === "active" && j.processedOn && (
                                   <div style={{ fontSize: "0.7rem", color: "var(--color-text-dim)", marginTop: "0.1rem" }}>
                                     Elapsed: {Math.floor((Date.now() - j.processedOn) / 1000)}s
@@ -2709,6 +3015,52 @@ export default function App() {
                   <p style={{ margin: "0.4rem 0", lineHeight: "1.4" }}><strong>Qualification Reason:</strong> {selectedInboxLeadDetails.qualification.qualificationReason}</p>
                 </div>
 
+                {/* Profile & Overlap Details */}
+                <div className="glass-card" style={{ padding: "1rem" }}>
+                  <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
+                    👤 Scraped Profile & Overlap
+                  </h3>
+                  {selectedInboxLeadDetails.lead ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.9rem" }}>
+                      <p style={{ margin: 0 }}><strong>Bio:</strong> {selectedInboxLeadDetails.lead.bio || "No bio scraped"}</p>
+                      <div style={{ display: "flex", gap: "1.5rem", margin: "0.2rem 0" }}>
+                        <span>👥 Followers: <strong>{selectedInboxLeadDetails.lead.followerCount?.toLocaleString() || 0}</strong></span>
+                        <span>👤 Following: <strong>{selectedInboxLeadDetails.lead.followingCount?.toLocaleString() || 0}</strong></span>
+                      </div>
+                      {selectedInboxLeadDetails.matchedFollowings && selectedInboxLeadDetails.matchedFollowings.length > 0 ? (
+                        <div style={{ marginTop: "0.5rem" }}>
+                          <strong style={{ display: "block", marginBottom: "0.25rem", color: "#22c55e" }}>
+                            🎯 Following Overlap ({selectedInboxLeadDetails.matchedFollowings.length} matched seeds):
+                          </strong>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                            {selectedInboxLeadDetails.matchedFollowings.map((handle: string) => (
+                              <span key={handle} style={{
+                                fontSize: "0.75rem",
+                                background: "rgba(34, 197, 94, 0.15)",
+                                border: "1px solid rgba(34, 197, 94, 0.3)",
+                                padding: "0.15rem 0.4rem",
+                                borderRadius: "4px",
+                                color: "#22c55e",
+                                fontWeight: "500"
+                              }}>
+                                @{handle}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <p style={{ margin: "0.5rem 0 0 0", color: "var(--color-text-dim)", fontSize: "0.85rem" }}>
+                          🚫 No following overlap found with active seed influencers.
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p style={{ margin: 0, color: "var(--color-text-dim)", fontSize: "0.85rem" }}>
+                      No full profile details scraped yet.
+                    </p>
+                  )}
+                </div>
+
                 {/* User Intelligence Aggregation Snapshot */}
                 {selectedInboxLeadDetails.userIntelligence && (
                   <div className="glass-card" style={{ padding: "1rem" }}>
@@ -2836,6 +3188,52 @@ export default function App() {
                       <div style={{ gridColumn: "span 2" }}>💡 Problem: <strong>{selectedCrmDetails.qualification?.problem || "Unknown"}</strong></div>
                       <div style={{ gridColumn: "span 2" }}>🛠️ Need: <strong>{selectedCrmDetails.qualification?.serviceNeeded || "Unknown"}</strong></div>
                     </div>
+                  </div>
+
+                  {/* Profile & Overlap Details */}
+                  <div className="glass-card" style={{ padding: "1rem", background: "rgba(255,255,255,0.02)" }}>
+                    <h3 style={{ fontSize: "1rem", color: "#fff", margin: "0 0 0.75rem 0", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "0.5rem" }}>
+                      👤 Scraped Profile & Overlap
+                    </h3>
+                    {selectedCrmDetails.lead ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.9rem" }}>
+                        <p style={{ margin: 0 }}><strong>Bio:</strong> {selectedCrmDetails.lead.bio || "No bio scraped"}</p>
+                        <div style={{ display: "flex", gap: "1.5rem", margin: "0.2rem 0" }}>
+                          <span>👥 Followers: <strong>{selectedCrmDetails.lead.followerCount?.toLocaleString() || 0}</strong></span>
+                          <span>👤 Following: <strong>{selectedCrmDetails.lead.followingCount?.toLocaleString() || 0}</strong></span>
+                        </div>
+                        {selectedCrmDetails.matchedFollowings && selectedCrmDetails.matchedFollowings.length > 0 ? (
+                          <div style={{ marginTop: "0.5rem" }}>
+                            <strong style={{ display: "block", marginBottom: "0.25rem", color: "#22c55e" }}>
+                              🎯 Following Overlap ({selectedCrmDetails.matchedFollowings.length} matched seeds):
+                            </strong>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                              {selectedCrmDetails.matchedFollowings.map((handle: string) => (
+                                <span key={handle} style={{
+                                  fontSize: "0.75rem",
+                                  background: "rgba(34, 197, 94, 0.15)",
+                                  border: "1px solid rgba(34, 197, 94, 0.3)",
+                                  padding: "0.15rem 0.4rem",
+                                  borderRadius: "4px",
+                                  color: "#22c55e",
+                                  fontWeight: "500"
+                                }}>
+                                  @{handle}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : (
+                          <p style={{ margin: "0.5rem 0 0 0", color: "var(--color-text-dim)", fontSize: "0.85rem" }}>
+                            🚫 No following overlap found with active seed influencers.
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p style={{ margin: 0, color: "var(--color-text-dim)", fontSize: "0.85rem" }}>
+                        No full profile details scraped yet.
+                      </p>
+                    )}
                   </div>
 
                   {/* Actions & Ownership Updates */}

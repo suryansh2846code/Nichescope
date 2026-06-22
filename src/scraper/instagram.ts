@@ -871,12 +871,8 @@ export async function scrapeHashtag(
     }
     const uniqueDiscoveries = Array.from(uniqueDiscoveriesMap.values());
     const usernames = new Set(discoveries.map(d => d.username));
-    console.log(
-      `[DISCOVERY] Usernames extracted: ${usernames.size}`
-    );
-
+    console.log(`[DISCOVERY] Usernames extracted: ${usernames.size}`);
     console.log(`Completed hashtag discovery. Found ${uniqueDiscoveries.length} unique authors.`);
-
     return {
       hashtag: cleanHashtag,
       discoveries: uniqueDiscoveries,
@@ -942,52 +938,88 @@ export async function scrapeComments(
       timeout: options.timeoutMs ?? 30_000,
     });
 
-    // Wait for the comment section to render
-    try {
-      await page.waitForSelector('ul li', { timeout: 10000 });
-    } catch {
-      console.warn("[WARN] Timed out waiting for comment list items");
-    }
+    // Wait for the page to render enough for comments
+    await page.waitForTimeout(3000);
 
-    // Scroll to load a few comments
+    // Scroll to load a few more comments
     for (let i = 0; i < 2; i++) {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
       await page.waitForTimeout(1000);
     }
 
-    // Extract comments
-    const comments = await page.evaluate(() => {
-      const listItems = Array.from(document.querySelectorAll('ul li'));
+    // Noise texts that appear as UI controls or footers — not real comment text
+    const NOISE_TEXTS = [
+      "•follow", "follow", "•unfollow", "unfollow",
+      "edited", "like", "reply", "likereply",
+      "see translation", "view replies", "hide replies",
+      "see more posts", "carousel", "meta", "instagram",
+      "view all comments", "load more comments",
+      "more options", "clip", "video", "audio",
+      "share", "save", "report", "block", "not interested",
+      "turn on post notifications", "go to post", "copy link",
+    ];
+
+    // Extract comments by traversing from username anchor links.
+    // Instagram's modern DOM (2025) no longer renders comments inside <ul><li> elements.
+    // Instead each comment block has an anchor pointing to '/username/' from which
+    // we can discover the commenter, then look for sibling spans containing the text.
+    const comments = await page.evaluate((noiseTexts: string[]) => {
+      const noiseSet = new Set(noiseTexts);
       const results: { username: string; text: string }[] = [];
       const seen = new Set<string>();
 
-      for (const li of listItems) {
-        const authorAnchor = li.querySelector('a[href]');
-        const spans = Array.from(li.querySelectorAll('span'));
-        
-        if (authorAnchor && spans.length > 0) {
-          const username = authorAnchor.textContent?.trim().replace(/^@/, "").toLowerCase();
-          
-          if (!username) continue;
+      const SYSTEM_PATHS = new Set([
+        "explore", "reels", "direct", "stories", "emails",
+        "developer", "about", "blog", "jobs", "help", "api",
+        "privacy", "terms", "locations", "instagram", "popular",
+      ]);
 
-          // Find the first span that contains text and is not the username itself and does not contain anchor elements
-          const textSpan = spans.find(s => {
-            const content = s.textContent?.trim();
-            return content && content.length > 0 && content !== username && !s.querySelector('a');
-          });
+      const anchors = Array.from(document.querySelectorAll('a[href]'));
+      for (const a of anchors) {
+        const href = (a as HTMLAnchorElement).getAttribute('href') || '';
+        const match = href.match(/^\/([a-zA-Z0-9_.-]+)\/$/); 
+        if (!match) continue;
 
-          if (textSpan) {
-            const text = textSpan.textContent?.trim() || "";
-            const key = `${username}:${text}`;
-            if (!seen.has(key) && text.length > 0) {
-              seen.add(key);
-              results.push({ username, text });
-            }
+        const username = match[1].toLowerCase().trim();
+        if (SYSTEM_PATHS.has(username)) continue;
+
+        // Traverse parent elements to find a sibling span with comment text
+        let parent = (a as HTMLElement).parentElement;
+        let commentText = '';
+        let found = false;
+
+        for (let depth = 0; depth < 6 && parent; depth++) {
+          const candidates = Array.from(parent.querySelectorAll('span, div'));
+          for (const cand of candidates) {
+            if (cand.contains(a)) continue;   // skip ancestors of anchor
+            if (cand.querySelector('a')) continue;  // skip containers with other links
+
+            const text = (cand.textContent || '').trim();
+            if (!text || text.length < 2) continue;
+            if (noiseSet.has(text.toLowerCase())) continue;
+            if (/^\d+[smhdw]$/.test(text)) continue; // skip timestamps
+            if (text.toLowerCase() === username) continue;
+            // Skip bare username-like strings (reply-to mentions shown in thread context)
+            if (/^[a-zA-Z0-9_.-]+$/.test(text) && text.length <= 30 && !text.includes(' ')) continue;
+
+            commentText = text;
+            found = true;
+            break;
+          }
+          if (found) break;
+          parent = parent.parentElement;
+        }
+
+        if (found && commentText) {
+          const key = `${username}:${commentText}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            results.push({ username, text: commentText });
           }
         }
       }
       return results;
-    });
+    }, NOISE_TEXTS);
 
     console.log(`Successfully scraped ${comments.length} comments from ${postUrl}`);
     return comments;

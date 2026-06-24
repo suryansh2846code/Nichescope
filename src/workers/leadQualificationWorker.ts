@@ -10,6 +10,8 @@ import { getAIProvider } from "../services/ai/AIProvider";
 import { LeadPipeline } from "../models/LeadPipeline";
 import { LeadActivity } from "../models/LeadActivity";
 import { setupWorkerLogger } from "../utils/logger";
+import { Lead } from "../models/Lead";
+import { calculateLeadScore } from "../services/ai/scoring";
 
 setupWorkerLogger("qualification");
 
@@ -79,12 +81,27 @@ export async function processLeadQualificationJob(job: {
   // Fetch any existing LeadQualification to compare scores for automation
   const oldQual = await LeadQualification.findOne({ username: normalizedUser });
 
+  // Before calculating score, fetch the following boost from the lead
+  const cleanUser = normalizedUser;
+  const lead = await Lead.findOne({ username: new RegExp(`^${cleanUser}$`, "i") });
+  const followingBoost = lead?.followingBoost || 0;
+
+  // Then when calling calculateLeadScore:
+  const isHighValue = lead && lead.followerCount > 10000;
+  const finalScore = calculateLeadScore(
+    userIntel.leadPostCount > 0 || !!isHighValue,
+    result.confidence,
+    userIntel.overallIntent,
+    userIntel.summary,
+    followingBoost
+  );
+
   // 6. Save or Update LeadQualification
   await LeadQualification.findOneAndUpdate(
     { username: normalizedUser },
     {
       username: normalizedUser,
-      leadScore: userIntel.leadScore,
+      leadScore: finalScore,
       problem: result.problem,
       serviceNeeded: result.serviceNeeded,
       urgency: result.urgency,
@@ -103,9 +120,10 @@ export async function processLeadQualificationJob(job: {
   // 7. CRM initialization and automation hooks
   try {
     let targetPriority: "low" | "medium" | "high" = "low";
-    if (result.buyingIntent > 85) {
+    // High-following-overlap leads now get higher CRM priority
+    if (result.buyingIntent > 85 || finalScore > 80) {
       targetPriority = "high";
-    } else if (result.buyingIntent > 60) {
+    } else if (result.buyingIntent > 60 || finalScore > 50) {
       targetPriority = "medium";
     }
 
@@ -133,7 +151,7 @@ export async function processLeadQualificationJob(job: {
       // Automate priority escalation when lead score increases significantly (>= 20 points)
       if (oldQual) {
         const oldScore = oldQual.leadScore || 0;
-        const newScore = userIntel.leadScore || 0;
+        const newScore = finalScore;
         if (newScore - oldScore >= 20) {
           existingPipeline.priority = "high";
           existingPipeline.lastActivityAt = new Date();

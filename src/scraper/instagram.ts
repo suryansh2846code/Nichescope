@@ -1068,6 +1068,117 @@ export async function scrapeComments(
   }
 }
 
+/**
+ * Extracts the list of accounts a user follows.
+ * Visits /username/following/ and scrapes the list of followed handles.
+ * Returns empty array if:
+ * - Account is private
+ * - Profile doesn't exist
+ * - Page fails to load
+ * - User has no followings visible
+ */
+export async function extractFollowing(
+  username: string,
+  options: { headless?: boolean; timeoutMs?: number } = {}
+): Promise<string[]> {
+  // In test mode, return mock followings
+  if (process.env.NODE_ENV === "test" || (typeof Bun !== "undefined" && Bun.env.NODE_ENV === "test")) {
+    return [
+      "nike", "lululemon", "peloton", "fitbit",
+      "applehealth", "strava", "myfitnesspal"
+    ];
+  }
+
+  const browser = await chromium.launch({
+    headless: options.headless ?? true,
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+    ],
+  });
+
+  try {
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      viewport: { width: 1280, height: 800 },
+    });
+
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
+
+    const followingUrl = `https://www.instagram.com/${username}/following/`;
+    console.log(`Navigating to following list: ${followingUrl}`);
+
+    try {
+      await page.goto(followingUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: options.timeoutMs ?? 30_000,
+      });
+    } catch (err) {
+      console.warn(`Failed to load following page for @${username}:`, err instanceof Error ? err.message : String(err));
+      return [];
+    }
+
+    // Wait for modal/content to render
+    await page.waitForTimeout(2000);
+
+    // Scroll modal if it exists to load more follows
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => {
+        const modal = document.querySelector('[role="dialog"]') ||
+                      document.querySelector('div[role="dialog"] ._aano') || 
+                      document.querySelector('div[role="dialog"] ul')?.parentElement;
+        if (modal) {
+          modal.scrollTop = modal.scrollHeight;
+        }
+      });
+      await page.waitForTimeout(1000);
+    }
+
+    // Extract usernames from follow links
+    const followings = await page.evaluate(() => {
+      const handles: string[] = [];
+      const seen = new Set<string>();
+
+      // Look for links to profiles in the following modal/page
+      const links = Array.from(document.querySelectorAll('a[href]'));
+      
+      for (const link of links) {
+        const href = (link as HTMLAnchorElement).getAttribute('href') || '';
+        const match = href.match(/^\/([a-zA-Z0-9_.-]+)\/?$/);
+        
+        if (!match) continue;
+        
+        const handle = (match[1] || "").toLowerCase().trim();
+        
+        // Skip system/meta accounts
+        if (["instagram", "explore", "direct", "stories"].includes(handle)) continue;
+        
+        // Skip duplicates
+        if (seen.has(handle)) continue;
+        
+        seen.add(handle);
+        handles.push(handle);
+      }
+
+      return handles;
+    });
+
+    console.log(`Extracted ${followings.length} followed accounts for @${username}`);
+    return followings;
+
+  } catch (err) {
+    console.error(`Error extracting following for @${username}:`, err);
+    return [];
+  } finally {
+    await browser.close();
+  }
+}
+
+
 if (import.meta.main) {
   const arg = Bun.argv[2];
 

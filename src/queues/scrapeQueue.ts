@@ -6,6 +6,7 @@ export interface ScrapeJobData {
   niche: string;
   maxFollowers?: number;
   testScenario?: string;
+  followingJobId?: string;
 }
 
 export const SCRAPE_QUEUE_NAME = "scrape";

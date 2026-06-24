@@ -2,10 +2,12 @@ import { Worker } from "bullmq";
 import { connectToDatabase } from "../db";
 import { createRedisConnectionOptions } from "../queues/redis";
 import { SCRAPE_QUEUE_NAME, type ScrapeJobData, scrapeQueue } from "../queues/scrapeQueue";
-import { scrapeProfile } from "../scraper/instagram";
+import { scrapeProfile, extractFollowing } from "../scraper/instagram";
 import { saveOrUpdateScrapedProfile } from "./saveLead";
 import { saveOrUpdatePosts } from "./savePost";
 import { setupWorkerLogger } from "../utils/logger";
+import { analyzeFollowingList } from "../services/following/followingAnalysisService";
+import { Lead } from "../models/Lead";
 
 // Setup logging interceptor
 setupWorkerLogger("scraper");
@@ -67,6 +69,28 @@ const worker = new Worker<ScrapeJobData>(
 
       console.log("STEP 5: Saving profile");
       await saveOrUpdateScrapedProfile(job.data.niche, profile);
+
+      // Extract following list for lead scoring boost
+      console.log(`Extracting following list for @${username}`);
+      const followingList = await extractFollowing(username);
+      
+      if (followingList.length > 0) {
+        const { followingBoost, overlapCount, matchedHandles } = await analyzeFollowingList(followingList, job.data.niche);
+        console.log(`Following analysis: overlap=${overlapCount}/${followingList.length}, boost=${followingBoost}`);
+        
+        // Store the boost in the Lead record so it's available downstream
+        await Lead.updateOne(
+          { username: new RegExp(`^${username}$`, "i") },
+          {
+            $set: {
+              followingBoost,
+              followingOverlapCount: overlapCount,
+              matchedSeedInfluencers: matchedHandles,
+              followingHandles: followingList,
+            }
+          }
+        );
+      }
 
       console.log("STEP 6: Saving posts");
       await saveOrUpdatePosts(username, posts);

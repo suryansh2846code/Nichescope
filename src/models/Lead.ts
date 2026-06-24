@@ -13,6 +13,9 @@ export interface LeadAttrs {
   scrapedAt: Date;
   rawData: unknown;
   followingHandles?: string[];
+  followingBoost?: number;
+  followingOverlapCount?: number;
+  matchedSeedInfluencers?: string[];
 }
 
 const leadSchema = new Schema(
@@ -71,6 +74,18 @@ const leadSchema = new Schema(
       default: {},
     },
     followingHandles: {
+      type: [String],
+      default: [],
+    },
+    followingBoost: {
+      type: Number,
+      default: 0,
+    },
+    followingOverlapCount: {
+      type: Number,
+      default: 0,
+    },
+    matchedSeedInfluencers: {
       type: [String],
       default: [],
     },

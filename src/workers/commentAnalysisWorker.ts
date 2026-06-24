@@ -69,15 +69,19 @@ const worker = new Worker<CommentAnalysisJobData>(
           };
         }
 
-        // Add to scrapeQueue
+        // Trigger profile + following scrape, then analyze following for boost
         const scrapeJobId = `scrape-${normalizedUser}-${Date.now()}`;
         console.log(`Enqueuing profile & following scrape for @${normalizedUser}`);
+        
+        // Store following analysis job id so we can track it
+        const followingJobId = `following-${normalizedUser}-${Date.now()}`;
         
         await scrapeQueue.add(
           SCRAPE_PROFILE_JOB_NAME,
           {
             username: normalizedUser,
             niche,
+            followingJobId, // Pass this so scrapeWorker can pick it up
           },
           { jobId: scrapeJobId }
         );

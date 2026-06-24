@@ -4,6 +4,7 @@ import { createRedisConnectionOptions } from "./redis";
 export interface InfluencerDiscoveryJobData {
   username?: string;
   niche?: string;
+  testScenario?: string;
   forceAll?: boolean;
 }
 

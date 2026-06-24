@@ -462,9 +462,46 @@ export async function scrapeProfile(
 
   // Handle mock test scenario
   if (options.testScenario) {
-    const scenario = options.testScenario;
+    const testScenario = options.testScenario;
+    const scenario = testScenario;
     if (options.onStep) options.onStep(1); // Opening profile
     await new Promise(r => setTimeout(r, 1000));
+
+    if (testScenario === "influencer-private") {
+      return {
+        profile: {
+          username: cleanUsername,
+          fullName: "Private Profile",
+          bio: "Private Account",
+          followerCount: 0,
+          followingCount: 0,
+          postCount: 0,
+          profileUrl: `${INSTAGRAM_BASE_URL}/${cleanUsername}/`,
+          scrapedAt: new Date(),
+          rawData: { title: "Private", description: "Private", canonicalUrl: "" }
+        },
+        posts: [],
+        reason: "Profile is private"
+      } as any;
+    }
+
+    if (testScenario === "influencer-no-posts") {
+      return {
+        profile: {
+          username: cleanUsername,
+          fullName: "No Posts",
+          bio: "No Posts Account",
+          followerCount: 100,
+          followingCount: 100,
+          postCount: 0,
+          profileUrl: `${INSTAGRAM_BASE_URL}/${cleanUsername}/`,
+          scrapedAt: new Date(),
+          rawData: { title: "No Posts", description: "No Posts", canonicalUrl: "" }
+        },
+        posts: [],
+        reason: "No posts found on profile"
+      } as any;
+    }
 
     if (scenario === "timeout") {
       if (options.onStep) options.onStep(3); // Loading posts

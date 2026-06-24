@@ -29,10 +29,32 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
   async (job) => {
     console.log(`Starting influencer discovery job ${job.id}`);
     
-    const { username, niche: jobNiche } = job.data || {};
+    const { username, niche: jobNiche, testScenario } = job.data || {};
     const POSTS_PER_RUN = 5;
     
     const scanInfluencer = async (cleanInfluencer: string, niche: string) => {
+      if (testScenario === "influencer-private") {
+        console.log(`Influencer @${cleanInfluencer} has private account (mock) — skipping`);
+        return {
+          influencerUsername: cleanInfluencer,
+          niche,
+          postsFound: 0,
+          enqueuedCount: 0,
+          status: "skipped" as const,
+          reason: "private_account"
+        };
+      }
+
+      if (testScenario === "influencer-no-posts") {
+        console.log(`Influencer @${cleanInfluencer} has no posts (mock) — skipping`);
+        return {
+          influencerUsername: cleanInfluencer,
+          niche,
+          discoveredPostUrls: [],
+          status: "success" as const
+        };
+      }
+
       let discoveredPostUrls: string[] = [];
 
       try {

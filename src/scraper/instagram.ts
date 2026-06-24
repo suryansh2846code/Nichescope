@@ -1,5 +1,4 @@
-// import { chromium } from "playwright";
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import fs from "fs";
 import path from "path";
 
@@ -48,7 +47,7 @@ const INSTAGRAM_BASE_URL = "https://www.instagram.com";
 export const MAX_POSTS_PER_PROFILE = 12;
 export const PROFILE_TIMEOUT_MS = 60000;
 
-async function safeClose(resource: any, name: string, timeoutMs: number = 5000) {
+export async function safeClose(resource: any, name: string, timeoutMs: number = 5000) {
   if (!resource) return;
   try {
     await Promise.race([
@@ -58,6 +57,49 @@ async function safeClose(resource: any, name: string, timeoutMs: number = 5000) 
   } catch (err) {
     console.error(`Warning: ${name} close failed or timed out:`, err instanceof Error ? err.message : String(err));
   }
+}
+
+export async function launchStealth(options: { headless?: boolean } = {}) {
+  const browser = await chromium.launch({
+    headless: options.headless ?? true,
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+    ],
+  });
+
+  const cookiePath = path.join(process.cwd(), "instagram_cookies.json");
+  let cookies = [];
+  if (fs.existsSync(cookiePath)) {
+    try {
+      cookies = JSON.parse(fs.readFileSync(cookiePath, "utf-8"));
+      console.log(`Loaded ${cookies.length} cookies for Instagram session.`);
+    } catch (e) {
+      console.error("Failed to parse Instagram cookies file:", e);
+    }
+  }
+
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    viewport: { width: 1280, height: 800 },
+    locale: "en-US",
+    timezoneId: "America/New_York",
+    extraHTTPHeaders: {
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+  });
+
+  if (cookies.length > 0) {
+    await context.addCookies(cookies);
+  }
+
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+  });
+
+  return { browser, context, page };
 }
 
 export function parseInstagramCount(value: string): number {
@@ -210,25 +252,15 @@ export async function extractProfileData(
   };
 }
 
-export async function extractPosts(
-  page: any,
-  maxPosts: number = 15,
-  onStep?: (step: number) => void,
-  deadlineMs?: number  // absolute epoch ms — if set, all waits respect remaining budget
-): Promise<ScrapedPost[]> {
-  const remaining = () => deadlineMs ? Math.max(0, deadlineMs - Date.now()) : Infinity;
-  const checkBudget = (minNeeded = 3000) => {
-    if (deadlineMs && remaining() < minNeeded) {
-      throw new Error("TIMEOUT");
-    }
-  };
-
-  if (onStep) onStep(3); // Collecting post urls
-  checkBudget(5000); // Need at least 5s to be worth starting post collection
+export async function collectRecentPostUrls(
+  page: Page,
+  maxPosts: number = 5,
+  timeoutMs: number = 60000
+): Promise<string[]> {
+  const deadlineMs = Date.now() + timeoutMs;
+  const remaining = () => Math.max(0, deadlineMs - Date.now());
 
   // Wait for the post grid to actually render before extracting links.
-  // Instagram renders the grid asynchronously — without this wait, evaluate()
-  // runs while the DOM still has 0 post anchors, giving "Current unique count: 0".
   try {
     await page.waitForSelector('a[href*="/p/"], a[href*="/reel/"]', {
       timeout: Math.min(10000, Math.max(3000, remaining() - 3000)),
@@ -237,10 +269,6 @@ export async function extractPosts(
     console.warn("[WARN] Timed out waiting for post grid — attempting extraction anyway");
   }
 
-  // Extract all post/reel hrefs from the current DOM.
-  // Uses getAttribute("href") (raw path like /p/xxx) instead of a.href,
-  // which can be empty-string before the document base URL is resolved.
-  // Also normalises /reels/ → /reel/ and strips query params to avoid dupes.
   const extractPostUrls = async (): Promise<string[]> => {
     return page.evaluate((baseUrl: string) => {
       const anchors = Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[];
@@ -248,12 +276,11 @@ export async function extractPosts(
       const results: string[] = [];
       for (const a of anchors) {
         const raw = a.getAttribute("href") || "";
-        if (!raw.match(/\/(p|reel|reels)\//)) continue;  // matches /p/, /reel/, /username/p/ etc.
-        // Normalise /reels/ → /reel/ for consistency
+        if (!raw.match(/\/(p|reel|reels)\//)) continue;
         const normalised = raw.replace(/^\/reels\//, "/reel/");
         const abs = `${baseUrl}${normalised}`;
-        // Strip query params (?img_index=1 etc.) to avoid treating same post as different
-        const clean = abs.split("?")[0].replace(/\/$/, "");
+        const parts = abs.split("?");
+        const clean = (parts[0] || "").replace(/\/$/, "");
         if (!seen.has(clean)) {
           seen.add(clean);
           results.push(clean);
@@ -276,7 +303,6 @@ export async function extractPosts(
 
   const postUrls = new Set<string>(initialUrls);
 
-  // Scroll to load more — but only if we have time budget and need more posts
   let scrolls = 0;
   let emptyScrolls = 0;
   while (postUrls.size < maxPosts && scrolls < 5 && remaining() > 8000) {
@@ -284,7 +310,6 @@ export async function extractPosts(
     console.log(`Scrolling profile page to load more posts... Current unique count: ${postUrls.size}, Remaining: ${Math.round(remaining() / 1000)}s`);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
 
-    // Adaptive wait: use less time if budget is tighter
     const scrollWait = Math.min(2000, Math.max(500, remaining() - 8000));
     await page.waitForTimeout(scrollWait);
 
@@ -307,21 +332,38 @@ export async function extractPosts(
     }
 
     if (emptyScrolls >= 3) {
-      console.warn(
-        `[EARLY EXIT]
-   No new URLs discovered after 3 scrolls`
-      );
+      console.warn(`[EARLY EXIT] No new URLs discovered after 3 scrolls`);
       break;
     }
 
     scrolls++;
   }
 
-  if (postUrls.size === 0) {
+  return Array.from(postUrls).slice(0, maxPosts);
+}
+
+export async function extractPosts(
+  page: any,
+  maxPosts: number = 15,
+  onStep?: (step: number) => void,
+  deadlineMs?: number  // absolute epoch ms — if set, all waits respect remaining budget
+): Promise<ScrapedPost[]> {
+  const remaining = () => deadlineMs ? Math.max(0, deadlineMs - Date.now()) : Infinity;
+  const checkBudget = (minNeeded = 3000) => {
+    if (deadlineMs && remaining() < minNeeded) {
+      throw new Error("TIMEOUT");
+    }
+  };
+
+  if (onStep) onStep(3); // Collecting post urls
+  checkBudget(5000); // Need at least 5s to be worth starting post collection
+
+  const targetUrls = await collectRecentPostUrls(page, maxPosts, remaining());
+
+  if (targetUrls.length === 0) {
     throw new Error("NO_POST_URLS_FOUND");
   }
 
-  const targetUrls = Array.from(postUrls).slice(0, maxPosts);
   console.log(`Extracting details for ${targetUrls.length} posts... Remaining budget: ${Math.round(remaining() / 1000)}s`);
   if (onStep && targetUrls.length > 0) onStep(4); // Visiting posts
 
@@ -365,7 +407,7 @@ export async function extractPosts(
           const parsed = parsePostMetaDescription(desc);
           if (parsed) {
             const match = url.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
-            const postId = match ? match[1] : url;
+            const postId = (match && match[1]) || url;
 
             const hashtags = extractHashtags(parsed.caption);
             const mentions = extractMentions(parsed.caption);
@@ -527,50 +569,10 @@ export async function scrapeProfile(
       const profileUrl = `${INSTAGRAM_BASE_URL}/${cleanUsername}/`;
 
       try {
-        browser = await chromium.launch({
-          headless: options.headless ?? true,
-          args: [
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-          ],
-        });
-        // context = await browser.newContext({
-        //   userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        //   viewport: { width: 1280, height: 800 },
-        //   locale: "en-US",
-        //   timezoneId: "America/New_York",
-        //   extraHTTPHeaders: {
-        //     "Accept-Language": "en-US,en;q=0.9",
-        //   },
-        // });
-        const cookiePath = path.join(process.cwd(), "instagram_cookies.json");
-        let cookies = [];
-        if (fs.existsSync(cookiePath)) {
-          try {
-            cookies = JSON.parse(fs.readFileSync(cookiePath, "utf-8"));
-            console.log(`Loaded ${cookies.length} cookies for Instagram session.`);
-          } catch (e) {
-            console.error("Failed to parse Instagram cookies file:", e);
-          }
-        }
-        context = await browser.newContext({
-          userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-          viewport: { width: 1280, height: 800 },
-          locale: "en-US",
-          timezoneId: "America/New_York",
-          extraHTTPHeaders: {
-            "Accept-Language": "en-US,en;q=0.9",
-          },
-        });
-        if (cookies.length > 0) {
-          await context.addCookies(cookies);
-        }
-        page = await context.newPage();
-        // Remove the webdriver flag that headless Chrome exposes — Instagram checks this
-        await page.addInitScript(() => {
-          Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-        });
+        const stealthObj = await launchStealth({ headless: options.headless });
+        browser = stealthObj.browser;
+        context = stealthObj.context;
+        page = stealthObj.page;
 
         // ── STEP 1: Navigate to profile ──────────────────────────────────────
         // Navigation timeout = min(25s, remaining - 5s buffer)
@@ -768,7 +770,8 @@ export async function scrapeHashtag(
           if (!raw.match(/\/(p|reel|reels)\//)) continue;
           const normalised = raw.replace(/^\/reels\//, "/reel/");
           const abs = `${baseUrl}${normalised}`;
-          const clean = abs.split("?")[0].replace(/\/$/, "");
+          const parts = abs.split("?");
+          const clean = (parts[0] || "").replace(/\/$/, "");
           if (!seen.has(clean)) { seen.add(clean); results.push(clean); }
         }
         return results;
@@ -980,7 +983,7 @@ export async function scrapeComments(
         const match = href.match(/^\/([a-zA-Z0-9_.-]+)\/$/); 
         if (!match) continue;
 
-        const username = match[1].toLowerCase().trim();
+        const username = (match[1] || "").toLowerCase().trim();
         if (SYSTEM_PATHS.has(username)) continue;
 
         // Traverse parent elements to find a sibling span with comment text

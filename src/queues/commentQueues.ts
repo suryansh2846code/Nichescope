@@ -2,7 +2,8 @@ import { Queue } from "bullmq";
 import { createRedisConnectionOptions } from "./redis";
 
 export interface InfluencerDiscoveryJobData {
-  // Empty or placeholder options
+  username?: string;
+  niche?: string;
   forceAll?: boolean;
 }
 

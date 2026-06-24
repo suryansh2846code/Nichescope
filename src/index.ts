@@ -13,6 +13,7 @@ import crmRouter from "./routes/crm";
 import devRouter from "./routes/dev";
 import logsRouter from "./routes/logs";
 import debugRouter from "./routes/debug";
+import settingsRouter from "./routes/settings";
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -83,6 +84,9 @@ app.use("/logs", logsRouter);
 
 console.log("Mounted /debug routes");
 app.use("/debug", debugRouter);
+
+console.log("Mounted /settings routes");
+app.use("/settings", settingsRouter);
 
 console.log("Routes Registered");
 

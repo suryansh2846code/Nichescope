@@ -8,6 +8,9 @@ import { saveOrUpdatePosts } from "./savePost";
 import { setupWorkerLogger } from "../utils/logger";
 import { analyzeFollowingList } from "../services/following/followingAnalysisService";
 import { Lead } from "../models/Lead";
+import { getSystemSettings } from "../models/SystemSettings";
+import { SeedInfluencer } from "../models/SeedInfluencer";
+import { HashtagDiscovery } from "../models/HashtagDiscovery";
 
 // Setup logging interceptor
 setupWorkerLogger("scraper");
@@ -37,9 +40,11 @@ const worker = new Worker<ScrapeJobData>(
     }, 10000);
 
     try {
+      const settings = await getSystemSettings();
       // scrapeProfile returns both profile and posts
       const { profile, posts } = await scrapeProfile(username, {
         testScenario: job.data.testScenario,
+        maxPosts: settings.maxPostsScraped,
         onStep: async (step) => {
           if (step === 1) {
             currentStage = "Opening Profile";
@@ -69,6 +74,16 @@ const worker = new Worker<ScrapeJobData>(
 
       console.log("STEP 5: Saving profile");
       await saveOrUpdateScrapedProfile(job.data.niche, profile);
+
+      // Automatically mark the influencer as processed in the SeedInfluencer registry
+      // and delete from HashtagDiscovery (seed discovery list) since it has been successfully scraped
+      const cleanUser = username.toLowerCase().trim();
+      const seedUpdate = await SeedInfluencer.updateOne(
+        { username: new RegExp(`^${cleanUser}$`, "i") },
+        { $set: { isProcessed: true, isActive: false, processedAt: new Date() } }
+      );
+      const hashDel = await HashtagDiscovery.deleteMany({ username: new RegExp(`^${cleanUser}$`, "i") });
+      console.log(`Auto-updated @${username}: SeedInfluencer modifiedCount=${seedUpdate.modifiedCount}, HashtagDiscovery deletedCount=${hashDel.deletedCount}`);
 
       // Extract following list for lead scoring boost
       console.log(`Extracting following list for @${username}`);

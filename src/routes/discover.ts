@@ -96,7 +96,7 @@ router.patch("/influencers/:username/toggle", async (req, res, next) => {
 });
 
 // DELETE /discover/influencers/:username
-router.delete("/discover/influencers/:username", async (req, res, next) => {
+router.delete("/influencers/:username", async (req, res, next) => {
   try {
     const { username } = req.params;
     const result = await SeedInfluencer.deleteOne({ username: username.toLowerCase() });

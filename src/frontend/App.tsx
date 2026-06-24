@@ -176,7 +176,25 @@ export default function App() {
   const [allJobs, setAllJobs] = useState<any[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsError, setJobsError] = useState<string | null>(null);
-  const [queueStats, setQueueStats] = useState<{ waiting: number; active: number; completed: number; failed: number } | null>(null);
+  const [queueStats, setQueueStats] = useState<any | null>(null);
+
+  // System Settings State
+  const [sysSettings, setSysSettings] = useState<any>({
+    maxPostsScraped: 5,
+    maxHashtagPosts: 50,
+    maxCommentsScraped: 20,
+    followingBoostWeight: 30,
+    intentThreshold: 60,
+    immediateContactThreshold: 85,
+    aiProvider: "gemini",
+    geminiApiKey: "",
+    openaiApiKey: "",
+    openrouterApiKey: "",
+    temperature: 0.2,
+  });
+  const [sysSettingsLoading, setSysSettingsLoading] = useState(false);
+  const [sysSettingsError, setSysSettingsError] = useState<string | null>(null);
+  const [sysSettingsSaveSuccess, setSysSettingsSaveSuccess] = useState<string | null>(null);
 
   // Developer Mode State
   const [isDevMode, setIsDevMode] = useState<boolean>(() => {
@@ -551,6 +569,52 @@ export default function App() {
     }
   }, []);
 
+  // Fetch System Settings Configuration
+  const fetchSysSettings = useCallback(async () => {
+    setSysSettingsLoading(true);
+    setSysSettingsError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/settings`);
+      if (!res.ok) {
+        throw new Error("Failed to load global system settings from backend");
+      }
+      const data = await res.json();
+      setSysSettings(data);
+    } catch (err) {
+      setSysSettingsError(err instanceof Error ? err.message : "Error fetching global settings");
+    } finally {
+      setSysSettingsLoading(false);
+    }
+  }, []);
+
+  // Save System Settings Configuration
+  const handleSaveSysSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSysSettingsLoading(true);
+    setSysSettingsError(null);
+    setSysSettingsSaveSuccess(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/settings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(sysSettings),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to update global system settings on backend");
+      }
+      const data = await res.json();
+      setSysSettings(data);
+      setSysSettingsSaveSuccess("Settings updated successfully!");
+      setTimeout(() => setSysSettingsSaveSuccess(null), 3000);
+    } catch (err) {
+      setSysSettingsError(err instanceof Error ? err.message : "Error saving settings");
+    } finally {
+      setSysSettingsLoading(false);
+    }
+  };
+
   // Toggle user monitoring configuration
   const handleToggleMonitoring = async (username: string) => {
     try {
@@ -762,8 +826,13 @@ export default function App() {
   useEffect(() => {
     if (activeTab === "settings") {
       fetchMonitoringData();
+      fetchSysSettings();
     }
-  }, [activeTab, fetchMonitoringData]);
+  }, [activeTab, fetchMonitoringData, fetchSysSettings]);
+
+  useEffect(() => {
+    fetchSysSettings();
+  }, [fetchSysSettings]);
 
   useEffect(() => {
     // if (activeTab !== "hashtag-discovery") return;
@@ -996,6 +1065,93 @@ export default function App() {
         </div>
       </header>
 
+      {/* Core Pipeline Status & Telemetry */}
+      <div className="pipeline-telemetry animate-fade-in" style={{ marginBottom: "2rem" }}>
+        <div className="glass-card" style={{ padding: "1.25rem", borderRadius: "16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, letterSpacing: "-0.01em", display: "flex", alignItems: "center", gap: "0.5rem", color: "#ffffff" }}>
+              ⚡ Core Pipeline Telemetry & Flow
+            </h3>
+            <div style={{ fontSize: "0.85rem", color: "var(--color-text-dim)" }}>
+              Processing Queue State: <span style={{ color: "var(--color-accent)", fontWeight: "bold" }}>{(queueStats?.active || 0)} Active</span> / <span style={{ color: "var(--color-warning)", fontWeight: "bold" }}>{(queueStats?.waiting || 0)} Waiting</span>
+            </div>
+          </div>
+          <div className="pipeline-flow-wrapper">
+            <div className={`pipeline-step-node ${queueStats?.breakdown?.discovery?.active > 0 || queueStats?.breakdown?.influencerDiscovery?.active > 0 ? "active" : ""}`}>
+              <div className="step-icon">🔍</div>
+              <div className="step-label">Discovery</div>
+              <div className="step-status">
+                {queueStats?.breakdown?.discovery?.active > 0 || queueStats?.breakdown?.influencerDiscovery?.active > 0 ? "⚡ Running" : "Idle"}
+              </div>
+              {(queueStats?.breakdown?.discovery?.active > 0 || queueStats?.breakdown?.influencerDiscovery?.active > 0) && <div className="pulse-indicator" />}
+            </div>
+            
+            <div className="pipeline-connector" />
+            
+            <div className={`pipeline-step-node ${queueStats?.breakdown?.commentScrape?.active > 0 ? "active" : ""}`}>
+              <div className="step-icon">💬</div>
+              <div className="step-label">Comment Scrape</div>
+              <div className="step-status">
+                {queueStats?.breakdown?.commentScrape?.active > 0 ? "⚡ Scraping" : "Idle"}
+              </div>
+              {queueStats?.breakdown?.commentScrape?.active > 0 && <div className="pulse-indicator" />}
+            </div>
+            
+            <div className="pipeline-connector" />
+            
+            <div className={`pipeline-step-node ${queueStats?.breakdown?.commentAnalysis?.active > 0 || queueStats?.breakdown?.postAnalysis?.active > 0 ? "active" : ""}`}>
+              <div className="step-icon">🔮</div>
+              <div className="step-label">AI Intent Gate</div>
+              <div className="step-status">
+                {queueStats?.breakdown?.commentAnalysis?.active > 0 || queueStats?.breakdown?.postAnalysis?.active > 0 ? "⚡ Processing" : "Idle"}
+              </div>
+              {(queueStats?.breakdown?.commentAnalysis?.active > 0 || queueStats?.breakdown?.postAnalysis?.active > 0) && <div className="pulse-indicator" />}
+            </div>
+            
+            <div className="pipeline-connector" />
+            
+            <div className={`pipeline-step-node ${queueStats?.breakdown?.profileScrape?.active > 0 ? "active" : ""}`}>
+              <div className="step-icon">🕵️</div>
+              <div className="step-label">Profile Scraper</div>
+              <div className="step-status">
+                {queueStats?.breakdown?.profileScrape?.active > 0 ? "⚡ Crawling" : "Idle"}
+              </div>
+              {queueStats?.breakdown?.profileScrape?.active > 0 && <div className="pulse-indicator" />}
+            </div>
+            
+            <div className="pipeline-connector" />
+            
+            <div className={`pipeline-step-node ${queueStats?.breakdown?.intelligence?.active > 0 || queueStats?.breakdown?.embedding?.active > 0 ? "active" : ""}`}>
+              <div className="step-icon">📈</div>
+              <div className="step-label">Overlap Booster</div>
+              <div className="step-status">
+                {queueStats?.breakdown?.intelligence?.active > 0 || queueStats?.breakdown?.embedding?.active > 0 ? "⚡ Scoring" : "Idle"}
+              </div>
+              {(queueStats?.breakdown?.intelligence?.active > 0 || queueStats?.breakdown?.embedding?.active > 0) && <div className="pulse-indicator" />}
+            </div>
+            
+            <div className="pipeline-connector" />
+            
+            <div className={`pipeline-step-node ${queueStats?.breakdown?.qualification?.active > 0 ? "active" : ""}`}>
+              <div className="step-icon">⚖️</div>
+              <div className="step-label">Lead Qualifier</div>
+              <div className="step-status">
+                {queueStats?.breakdown?.qualification?.active > 0 ? "⚡ Qualifying" : "Idle"}
+              </div>
+              {queueStats?.breakdown?.qualification?.active > 0 && <div className="pulse-indicator" />}
+            </div>
+            
+            <div className="pipeline-connector" />
+            
+            <div className="pipeline-step-node active">
+              <div className="step-icon">📂</div>
+              <div className="step-label">CRM Integration</div>
+              <div className="step-status" style={{ color: "var(--color-success)" }}>Connected</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Tab Navigation */}
       <div className="tab-navigation animate-fade-in" style={{ marginBottom: "2rem" }}>
         <button
@@ -1053,12 +1209,16 @@ export default function App() {
 
       {activeTab === "discovery" && (
         <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
-          {/* Top Search bar card */}
-          <div className="glass-card" style={{ padding: "2rem", marginBottom: "2rem", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-            <h2 className="card-title" style={{ fontSize: "1.6rem", margin: 0 }}>🔍 AI-Powered Lead Discovery</h2>
-            <p style={{ color: "var(--color-text-dim)", margin: 0, fontSize: "0.95rem" }}>
+          {/* Page Help / Description Panel */}
+          <div className="glass-card page-description-banner" style={{ marginBottom: "1.5rem" }}>
+            <h3>🔍 Semantic Lead Discovery</h3>
+            <p>
               Search across the scraped universe using natural language semantic queries, or input hashtags to initiate automated discovery pipelines.
             </p>
+          </div>
+
+          {/* Top Search bar card */}
+          <div className="glass-card" style={{ padding: "2rem", marginBottom: "2rem", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
 
             <form onSubmit={handleSearchSubmit} style={{ display: "flex", gap: "1rem" }}>
               <input
@@ -1511,6 +1671,14 @@ export default function App() {
 
       {activeTab === "seed-influencers" && (
         <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
+          {/* Page Help / Description Panel */}
+          <div className="glass-card page-description-banner" style={{ marginBottom: "1.5rem" }}>
+            <h3>🎯 Seed Influencer Registry</h3>
+            <p>
+              Manage seed influencer accounts within your target niche. The system monitors their posts and comment feeds to identify potential buyers asking questions or seeking recommendations.
+            </p>
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "2rem", alignItems: "start" }}>
             <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
               <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>🎯 Manage Seed Influencers</h3>
@@ -2111,89 +2279,250 @@ export default function App() {
       )}
 
       {activeTab === "settings" && (
-        <div className="monitoring-container animate-fade-in" style={{ padding: "0 1rem" }}>
-          <div className="glass-card card-table" style={{ padding: "1.5rem" }}>
-            <h2 className="card-title">⚙️ Monitoring Configuration</h2>
-            <p style={{ color: "var(--color-text-dim)", marginBottom: "1.5rem", fontSize: "0.9rem" }}>
-              Enable or pause periodic target scanning and check frequency updates.
+        <div className="settings-container animate-fade-in" style={{ padding: "0 1rem", display: "flex", flexDirection: "column", gap: "2rem" }}>
+          {/* Page Help / Description Panel */}
+          <div className="glass-card page-description-banner">
+            <h3>⚙️ System Configurations & Customization</h3>
+            <p>
+              Tune scraping post limits, comment count depth, following overlap weights, AI gate parameters, and API credentials. Keep target scanning paused or active.
             </p>
+          </div>
 
-            {monitoringLoading && (
-              <div style={{ textAlign: "center", padding: "3rem" }}>
-                <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
-                <p style={{ color: "var(--color-text-dim)" }}>Loading configurations...</p>
-              </div>
-            )}
-            {monitoringError && <div className="toast toast-error">{monitoringError}</div>}
-
-            {!monitoringLoading && !monitoringError && monitoringConfigs.length === 0 ? (
-              <p style={{ color: "var(--color-text-dim)", textAlign: "center", padding: "2rem 0" }}>
-                No configurations found. Run a scraper or discovery pipeline to initialize.
+          <div className="settings-grid-layout" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2rem" }}>
+            {/* Target monitor configurations */}
+            <div className="glass-card card-table" style={{ padding: "1.5rem" }}>
+              <h2 className="card-title" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>⚙️ Monitored Targets</h2>
+              <p style={{ color: "var(--color-text-dim)", marginBottom: "1.5rem", fontSize: "0.9rem" }}>
+                Enable or pause periodic target scanning and check frequency updates.
               </p>
-            ) : (
-              <div className="table-responsive">
-                <table className="leads-table">
-                  <thead>
-                    <tr>
-                      <th>Username</th>
-                      <th>Status</th>
-                      <th>Last Checked</th>
-                      <th>Checks Run</th>
-                      <th>New Posts Found Count</th>
-                      <th>Settings</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {monitoringConfigs.map((config) => (
-                      <tr key={config.username} className="lead-row">
-                        <td style={{ fontWeight: "bold" }}>@{config.username}</td>
-                        <td>
-                          <span className={`status-badge ${config.monitoringEnabled ? "status-completed" : "status-failed"}`}>
-                            {config.monitoringEnabled ? "ENABLED" : "PAUSED"}
-                          </span>
-                        </td>
-                        <td>
-                          <span style={{ fontSize: "0.85rem", color: "var(--color-text-dim)" }}>
-                            {config.lastCheckedAt && new Date(config.lastCheckedAt).getTime() > 0
-                              ? new Date(config.lastCheckedAt).toLocaleString()
-                              : "Never"}
-                          </span>
-                        </td>
-                        <td>{config.totalChecks}</td>
-                        <td>{config.totalChangesDetected}</td>
-                        <td>
-                          <button
-                            onClick={() => handleToggleMonitoring(config.username)}
-                            className={`btn ${config.monitoringEnabled ? "btn-secondary" : "btn-primary"}`}
-                            style={{ padding: "0.4rem 0.8rem", fontSize: "0.8rem" }}
-                          >
-                            {config.monitoringEnabled ? "Pause" : "Monitor"}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
 
-            {/* Developer Settings Card */}
-            <div style={{ marginTop: "2rem", paddingTop: "2rem", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-              <h3 style={{ fontSize: "1.2rem", color: "#fff", marginBottom: "0.5rem" }}>🛠️ Developer Configuration</h3>
-              <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-                <label className="switch" style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={isDevMode}
-                    onChange={(e) => {
-                      setIsDevMode(e.target.checked);
-                      localStorage.setItem("isDevMode", e.target.checked ? "true" : "false");
-                    }}
-                    style={{ cursor: "pointer" }}
-                  />
-                  <span style={{ fontSize: "0.9rem", color: "#fff", fontWeight: "bold" }}>Enable Developer Mode Panel</span>
-                </label>
-              </div>
+              {monitoringLoading && (
+                <div style={{ textAlign: "center", padding: "3rem" }}>
+                  <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
+                  <p style={{ color: "var(--color-text-dim)" }}>Loading configurations...</p>
+                </div>
+              )}
+              {monitoringError && <div className="toast toast-error">{monitoringError}</div>}
+
+              {!monitoringLoading && !monitoringError && monitoringConfigs.length === 0 ? (
+                <p style={{ color: "var(--color-text-dim)", textAlign: "center", padding: "2rem 0" }}>
+                  No configurations found. Run a scraper or discovery pipeline to initialize.
+                </p>
+              ) : (
+                <div className="table-responsive">
+                  <table className="leads-table">
+                    <thead>
+                      <tr>
+                        <th>Username</th>
+                        <th>Status</th>
+                        <th>Last Checked</th>
+                        <th>Checks</th>
+                        <th>Changes</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monitoringConfigs.map((config) => (
+                        <tr key={config.username} className="lead-row">
+                          <td style={{ fontWeight: "bold" }}>@{config.username}</td>
+                          <td>
+                            <span className={`status-badge ${config.monitoringEnabled ? "status-completed" : "status-failed"}`}>
+                              {config.monitoringEnabled ? "ACTIVE" : "PAUSED"}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>
+                              {config.lastCheckedAt && new Date(config.lastCheckedAt).getTime() > 0
+                                ? new Date(config.lastCheckedAt).toLocaleString()
+                                : "Never"}
+                            </span>
+                          </td>
+                          <td>{config.totalChecks}</td>
+                          <td>{config.totalChangesDetected}</td>
+                          <td>
+                            <button
+                              onClick={() => handleToggleMonitoring(config.username)}
+                              className={`btn ${config.monitoringEnabled ? "btn-secondary" : "btn-primary"}`}
+                              style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", margin: 0, minWidth: "auto" }}
+                            >
+                              {config.monitoringEnabled ? "Pause" : "Monitor"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Pipeline engine settings */}
+            <div className="glass-card" style={{ padding: "1.5rem" }}>
+              <h2 className="card-title" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>🔧 Pipeline Parameters</h2>
+              <p style={{ color: "var(--color-text-dim)", marginBottom: "1.5rem", fontSize: "0.9rem" }}>
+                Configure scraper scroll depths, following boost multipliers, and AI gate thresholds.
+              </p>
+
+              {sysSettingsSaveSuccess && <div className="toast toast-success" style={{ marginBottom: "1rem" }}>{sysSettingsSaveSuccess}</div>}
+              {sysSettingsError && <div className="toast toast-error" style={{ marginBottom: "1rem" }}>{sysSettingsError}</div>}
+
+              <form onSubmit={handleSaveSysSettings} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  <div>
+                    <label style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", fontWeight: "bold", display: "block", marginBottom: "0.25rem" }}>Max Profile Posts</label>
+                    <input
+                      type="number"
+                      value={sysSettings.maxPostsScraped}
+                      onChange={(e) => setSysSettings({ ...sysSettings, maxPostsScraped: Number(e.target.value) })}
+                      className="form-control"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", fontWeight: "bold", display: "block", marginBottom: "0.25rem" }}>Max Hashtag Posts</label>
+                    <input
+                      type="number"
+                      value={sysSettings.maxHashtagPosts}
+                      onChange={(e) => setSysSettings({ ...sysSettings, maxHashtagPosts: Number(e.target.value) })}
+                      className="form-control"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  <div>
+                    <label style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", fontWeight: "bold", display: "block", marginBottom: "0.25rem" }}>Max Post Comments</label>
+                    <input
+                      type="number"
+                      value={sysSettings.maxCommentsScraped}
+                      onChange={(e) => setSysSettings({ ...sysSettings, maxCommentsScraped: Number(e.target.value) })}
+                      className="form-control"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", fontWeight: "bold", display: "block", marginBottom: "0.25rem" }}>Following Boost Weight</label>
+                    <input
+                      type="number"
+                      value={sysSettings.followingBoostWeight}
+                      onChange={(e) => setSysSettings({ ...sysSettings, followingBoostWeight: Number(e.target.value) })}
+                      className="form-control"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  <div>
+                    <label style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", fontWeight: "bold", display: "block", marginBottom: "0.25rem" }}>AI Intent Threshold (60-100)</label>
+                    <input
+                      type="number"
+                      value={sysSettings.intentThreshold}
+                      onChange={(e) => setSysSettings({ ...sysSettings, intentThreshold: Number(e.target.value) })}
+                      className="form-control"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", fontWeight: "bold", display: "block", marginBottom: "0.25rem" }}>Immediate Action (80-100)</label>
+                    <input
+                      type="number"
+                      value={sysSettings.immediateContactThreshold}
+                      onChange={(e) => setSysSettings({ ...sysSettings, immediateContactThreshold: Number(e.target.value) })}
+                      className="form-control"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  <div>
+                    <label style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", fontWeight: "bold", display: "block", marginBottom: "0.25rem" }}>AI Provider</label>
+                    <select
+                      value={sysSettings.aiProvider}
+                      onChange={(e) => setSysSettings({ ...sysSettings, aiProvider: e.target.value })}
+                      className="form-control"
+                      style={{ width: "100%", height: "38px", background: "rgba(9,6,17,0.8)", border: "var(--glass-border)", color: "#fff", borderRadius: "8px", padding: "0 0.5rem" }}
+                    >
+                      <option value="gemini">Gemini AI</option>
+                      <option value="openai">OpenAI</option>
+                      <option value="openrouter">OpenRouter (Llama 3)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", fontWeight: "bold", display: "block", marginBottom: "0.25rem" }}>LLM Temperature (0.0-1.0)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="1"
+                      value={sysSettings.temperature}
+                      onChange={(e) => setSysSettings({ ...sysSettings, temperature: Number(e.target.value) })}
+                      className="form-control"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", fontWeight: "bold", display: "block", marginBottom: "0.25rem" }}>API Secret Keys (Override defaults)</label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    <input
+                      type="password"
+                      placeholder="Gemini API Key"
+                      value={sysSettings.geminiApiKey || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, geminiApiKey: e.target.value })}
+                      className="form-control"
+                      style={{ width: "100%" }}
+                    />
+                    <input
+                      type="password"
+                      placeholder="OpenAI API Key"
+                      value={sysSettings.openaiApiKey || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, openaiApiKey: e.target.value })}
+                      className="form-control"
+                      style={{ width: "100%" }}
+                    />
+                    <input
+                      type="password"
+                      placeholder="OpenRouter API Key"
+                      value={sysSettings.openrouterApiKey || ""}
+                      onChange={(e) => setSysSettings({ ...sysSettings, openrouterApiKey: e.target.value })}
+                      className="form-control"
+                      style={{ width: "100%" }}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={sysSettingsLoading}
+                  className="btn btn-primary"
+                  style={{ marginTop: "1rem", alignSelf: "flex-end" }}
+                >
+                  {sysSettingsLoading ? "Saving..." : "Save Configs"}
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {/* Developer Settings Card */}
+          <div className="glass-card" style={{ padding: "1.5rem" }}>
+            <h3 style={{ fontSize: "1.2rem", color: "#fff", marginBottom: "0.5rem" }}>🛠️ Developer Configuration</h3>
+            <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+              <label className="switch" style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={isDevMode}
+                  onChange={(e) => {
+                    setIsDevMode(e.target.checked);
+                    localStorage.setItem("isDevMode", e.target.checked ? "true" : "false");
+                  }}
+                  style={{ cursor: "pointer" }}
+                />
+                <span style={{ fontSize: "0.9rem", color: "#fff", fontWeight: "bold" }}>Enable Developer Mode Panel</span>
+              </label>
             </div>
           </div>
         </div>
@@ -2446,6 +2775,14 @@ export default function App() {
 
       {activeTab === "developer" && (
         <div className="developer-container animate-fade-in" style={{ padding: "0 1rem" }}>
+          {/* Page Help / Description Panel */}
+          <div className="glass-card page-description-banner" style={{ marginBottom: "1.5rem" }}>
+            <h3>🛠️ Developer Operations Console</h3>
+            <p>
+              Simulate edge cases, trigger test scenarios, reset queues, and debug state variables without using live Instagram API sessions.
+            </p>
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "2rem", alignItems: "start" }}>
 
             {/* Left Column: Feature Testing Deck */}

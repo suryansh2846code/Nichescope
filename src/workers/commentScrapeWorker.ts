@@ -9,6 +9,7 @@ import {
 } from "../queues/commentQueues";
 import { scrapeComments } from "../scraper/instagram";
 import { setupWorkerLogger } from "../utils/logger";
+import { getSystemSettings } from "../models/SystemSettings";
 
 // Setup logging interceptor
 setupWorkerLogger("comment-scraper");
@@ -33,9 +34,11 @@ const worker = new Worker<CommentScrapeJobData>(
     const postId = match ? match[1] : "unknown-post";
 
     try {
+      const settings = await getSystemSettings();
       // Scrape comments for the post
-      const comments = await scrapeComments(postUrl);
-      console.log(`Scraped ${comments.length} comments for post ${postId}`);
+      let comments = await scrapeComments(postUrl);
+      comments = comments.slice(0, settings.maxCommentsScraped);
+      console.log(`Scraped ${comments.length} comments (limited by setting) for post ${postId}`);
 
       let enqueuedComments = 0;
 

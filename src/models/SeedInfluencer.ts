@@ -5,6 +5,8 @@ export interface SeedInfluencerAttrs {
   niche: string;
   isActive: boolean;
   lastProcessedPostId?: string;
+  isProcessed?: boolean;
+  processedAt?: Date;
   updatedAt: Date;
 }
 
@@ -30,6 +32,14 @@ const seedInfluencerSchema = new Schema(
     lastProcessedPostId: {
       type: String,
       trim: true,
+    },
+    isProcessed: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    processedAt: {
+      type: Date,
     },
   },
   {

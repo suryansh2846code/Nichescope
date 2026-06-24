@@ -906,3 +906,161 @@ a:hover {
   border-radius: 9999px;
   box-shadow: 0 0 8px rgba(159, 62, 255, 0.3);
 }
+
+/* ==========================================================================
+   Page Banners, Visual Pipeline & Glassmorphism Updates
+   ========================================================================== */
+.page-description-banner {
+  background: linear-gradient(135deg, rgba(23, 14, 39, 0.6) 0%, rgba(159, 62, 255, 0.05) 100%);
+  border-left: 4px solid var(--color-primary);
+  padding: 1.25rem 1.5rem;
+  border-radius: 12px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.page-description-banner h3 {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: #fff;
+  margin-bottom: 0.35rem;
+}
+
+.page-description-banner p {
+  color: var(--color-text-dim);
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+/* Pipeline visual nodes */
+.pipeline-flow-wrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding: 1rem 0.5rem;
+  scrollbar-width: thin;
+}
+
+.pipeline-step-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: rgba(23, 14, 39, 0.3);
+  border: var(--glass-border);
+  border-radius: 12px;
+  padding: 1rem 0.75rem;
+  min-width: 120px;
+  flex: 1;
+  transition: var(--transition-smooth);
+}
+
+.pipeline-step-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(159, 62, 255, 0.1);
+  border-color: rgba(159, 62, 255, 0.25);
+}
+
+.pipeline-step-node.active {
+  border-color: var(--color-primary);
+  background: rgba(159, 62, 255, 0.08);
+  box-shadow: 0 0 15px rgba(159, 62, 255, 0.15);
+}
+
+.step-icon {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+  filter: drop-shadow(0 0 5px rgba(159, 62, 255, 0.3));
+}
+
+.pipeline-step-node.active .step-icon {
+  animation: float 2s ease-in-out infinite;
+}
+
+.step-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 0.25rem;
+  white-space: nowrap;
+}
+
+.step-status {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-dim);
+}
+
+.pipeline-step-node.active .step-status {
+  color: var(--color-accent);
+}
+
+.pipeline-connector {
+  height: 2px;
+  flex-grow: 1;
+  background: linear-gradient(90deg, rgba(159, 62, 255, 0.1) 0%, rgba(0, 216, 255, 0.1) 100%);
+  min-width: 15px;
+  max-width: 40px;
+}
+
+.pulse-indicator {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  background-color: var(--color-accent);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--color-accent);
+  animation: pulse-ring 1.5s cubic-bezier(0.215, 0.610, 0.355, 1) infinite;
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.85);
+    box-shadow: 0 0 0 0 rgba(0, 216, 255, 0.7);
+  }
+  70% {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 6px rgba(0, 216, 255, 0);
+  }
+  100% {
+    transform: scale(0.85);
+    box-shadow: 0 0 0 0 rgba(0, 216, 255, 0);
+  }
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-4px); }
+  100% { transform: translateY(0px); }
+}
+
+/* Settings layouts and forms styles */
+.form-control {
+  background: rgba(9, 6, 17, 0.6);
+  border: var(--glass-border);
+  border-radius: 8px;
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  padding: 0.6rem 0.8rem;
+  outline: none;
+  transition: var(--transition-smooth);
+}
+
+.form-control:focus {
+  border: var(--glass-border-focus);
+  box-shadow: 0 0 10px rgba(159, 62, 255, 0.15);
+  background: rgba(9, 6, 17, 0.85);
+}
+
+@media (max-width: 768px) {
+  .settings-grid-layout {
+    grid-template-columns: 1fr !important;
+  }
+}

@@ -633,10 +633,11 @@ export async function scrapeProfile(
         }
 
         console.log(`Found ${profile.postCount} posts. Budget remaining: ${Math.round(remaining() / 1000)}s`);
-        console.log(`Limiting scrape to latest ${MAX_POSTS_PER_PROFILE} posts`);
+        const limit = options.maxPosts ?? MAX_POSTS_PER_PROFILE;
+        console.log(`Limiting scrape to latest ${limit} posts`);
 
         // ── STEP 3–4: Scrape posts with deadline awareness ───────────────────
-        const posts = await extractPosts(page, MAX_POSTS_PER_PROFILE, options.onStep, deadlineMs);
+        const posts = await extractPosts(page, limit, options.onStep, deadlineMs);
         if (posts.length === 0) {
           throw new Error("NO_POST_URLS_FOUND");
         }

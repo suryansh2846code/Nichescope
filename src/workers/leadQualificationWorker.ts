@@ -12,6 +12,7 @@ import { LeadActivity } from "../models/LeadActivity";
 import { setupWorkerLogger } from "../utils/logger";
 import { Lead } from "../models/Lead";
 import { calculateLeadScore } from "../services/ai/scoring";
+import { getSystemSettings } from "../models/SystemSettings";
 
 setupWorkerLogger("qualification");
 
@@ -61,14 +62,15 @@ export async function processLeadQualificationJob(job: {
   );
   await job.updateProgress(70);
 
+  const settings = await getSystemSettings();
+  const immediateThreshold = settings.immediateContactThreshold ?? 85;
+  const standardThreshold = settings.intentThreshold ?? 60;
+
   // 4. Determine recommendedAction based on buyingIntent
-  // - buyingIntent > 85 -> "Contact immediately"
-  // - buyingIntent > 60 -> "Monitor"
-  // - else -> "Low priority"
   let recommendedAction = "Low priority";
-  if (result.buyingIntent > 85) {
+  if (result.buyingIntent > immediateThreshold) {
     recommendedAction = "Contact immediately";
-  } else if (result.buyingIntent > 60) {
+  } else if (result.buyingIntent > standardThreshold) {
     recommendedAction = "Monitor";
   }
 
@@ -121,9 +123,9 @@ export async function processLeadQualificationJob(job: {
   try {
     let targetPriority: "low" | "medium" | "high" = "low";
     // High-following-overlap leads now get higher CRM priority
-    if (result.buyingIntent > 85 || finalScore > 80) {
+    if (result.buyingIntent > immediateThreshold || finalScore > 80) {
       targetPriority = "high";
-    } else if (result.buyingIntent > 60 || finalScore > 50) {
+    } else if (result.buyingIntent > standardThreshold || finalScore > 50) {
       targetPriority = "medium";
     }
 

@@ -1,11 +1,11 @@
 import { Router } from "express";
 import { scrapeQueue } from "../queues/scrapeQueue";
 import { discoveryQueue } from "../queues/discoveryQueue";
-import {
-  influencerDiscoveryQueue,
-  commentScrapeQueue,
-  commentAnalysisQueue,
-} from "../queues/commentQueues";
+import { influencerDiscoveryQueue, commentScrapeQueue, commentAnalysisQueue } from "../queues/commentQueues";
+import { leadQualificationQueue } from "../queues/leadQualificationQueue";
+import { userIntelligenceQueue } from "../queues/userIntelligenceQueue";
+import { embeddingQueue } from "../queues/embeddingQueue";
+import { analysisQueue } from "../queues/analysisQueue";
 
 const router = Router();
 
@@ -103,35 +103,39 @@ router.get("/stats", async (req, res, next) => {
       scrapeWaiting, scrapeActive, scrapeCompleted, scrapeFailed,
       infWaiting, infActive, infCompleted, infFailed,
       cScrapeWaiting, cScrapeActive, cScrapeCompleted, cScrapeFailed,
-      cAnalWaiting, cAnalActive, cAnalCompleted, cAnalFailed
+      cAnalWaiting, cAnalActive, cAnalCompleted, cAnalFailed,
+      qualWaiting, qualActive, qualCompleted, qualFailed,
+      intelWaiting, intelActive, intelCompleted, intelFailed,
+      embedWaiting, embedActive, embedCompleted, embedFailed,
+      analWaiting, analActive, analCompleted, analFailed
     ] = await Promise.all([
-      discoveryQueue.getWaitingCount(),
-      discoveryQueue.getActiveCount(),
-      discoveryQueue.getCompletedCount(),
-      discoveryQueue.getFailedCount(),
-      scrapeQueue.getWaitingCount(),
-      scrapeQueue.getActiveCount(),
-      scrapeQueue.getCompletedCount(),
-      scrapeQueue.getFailedCount(),
-      influencerDiscoveryQueue.getWaitingCount(),
-      influencerDiscoveryQueue.getActiveCount(),
-      influencerDiscoveryQueue.getCompletedCount(),
-      influencerDiscoveryQueue.getFailedCount(),
-      commentScrapeQueue.getWaitingCount(),
-      commentScrapeQueue.getActiveCount(),
-      commentScrapeQueue.getCompletedCount(),
-      commentScrapeQueue.getFailedCount(),
-      commentAnalysisQueue.getWaitingCount(),
-      commentAnalysisQueue.getActiveCount(),
-      commentAnalysisQueue.getCompletedCount(),
-      commentAnalysisQueue.getFailedCount()
+      discoveryQueue.getWaitingCount(), discoveryQueue.getActiveCount(), discoveryQueue.getCompletedCount(), discoveryQueue.getFailedCount(),
+      scrapeQueue.getWaitingCount(), scrapeQueue.getActiveCount(), scrapeQueue.getCompletedCount(), scrapeQueue.getFailedCount(),
+      influencerDiscoveryQueue.getWaitingCount(), influencerDiscoveryQueue.getActiveCount(), influencerDiscoveryQueue.getCompletedCount(), influencerDiscoveryQueue.getFailedCount(),
+      commentScrapeQueue.getWaitingCount(), commentScrapeQueue.getActiveCount(), commentScrapeQueue.getCompletedCount(), commentScrapeQueue.getFailedCount(),
+      commentAnalysisQueue.getWaitingCount(), commentAnalysisQueue.getActiveCount(), commentAnalysisQueue.getCompletedCount(), commentAnalysisQueue.getFailedCount(),
+      leadQualificationQueue.getWaitingCount(), leadQualificationQueue.getActiveCount(), leadQualificationQueue.getCompletedCount(), leadQualificationQueue.getFailedCount(),
+      userIntelligenceQueue.getWaitingCount(), userIntelligenceQueue.getActiveCount(), userIntelligenceQueue.getCompletedCount(), userIntelligenceQueue.getFailedCount(),
+      embeddingQueue.getWaitingCount(), embeddingQueue.getActiveCount(), embeddingQueue.getCompletedCount(), embeddingQueue.getFailedCount(),
+      analysisQueue.getWaitingCount(), analysisQueue.getActiveCount(), analysisQueue.getCompletedCount(), analysisQueue.getFailedCount()
     ]);
 
     res.json({
-      waiting: discWaiting + scrapeWaiting + infWaiting + cScrapeWaiting + cAnalWaiting,
-      active: discActive + scrapeActive + infActive + cScrapeActive + cAnalActive,
-      completed: discCompleted + scrapeCompleted + infCompleted + cScrapeCompleted + cAnalCompleted,
-      failed: discFailed + scrapeFailed + infFailed + cScrapeFailed + cAnalFailed
+      waiting: discWaiting + scrapeWaiting + infWaiting + cScrapeWaiting + cAnalWaiting + qualWaiting + intelWaiting + embedWaiting + analWaiting,
+      active: discActive + scrapeActive + infActive + cScrapeActive + cAnalActive + qualActive + intelActive + embedActive + analActive,
+      completed: discCompleted + scrapeCompleted + infCompleted + cScrapeCompleted + cAnalCompleted + qualCompleted + intelCompleted + embedCompleted + analCompleted,
+      failed: discFailed + scrapeFailed + infFailed + cScrapeFailed + cAnalFailed + qualFailed + intelFailed + embedFailed + analFailed,
+      breakdown: {
+        discovery: { waiting: discWaiting, active: discActive },
+        profileScrape: { waiting: scrapeWaiting, active: scrapeActive },
+        influencerDiscovery: { waiting: infWaiting, active: infActive },
+        commentScrape: { waiting: cScrapeWaiting, active: cScrapeActive },
+        commentAnalysis: { waiting: cAnalWaiting, active: cAnalActive },
+        qualification: { waiting: qualWaiting, active: qualActive },
+        intelligence: { waiting: intelWaiting, active: intelActive },
+        embedding: { waiting: embedWaiting, active: embedActive },
+        postAnalysis: { waiting: analWaiting, active: analActive }
+      }
     });
   } catch (error) {
     next(error);

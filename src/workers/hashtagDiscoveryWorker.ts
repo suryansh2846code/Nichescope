@@ -7,6 +7,7 @@ import { Lead } from "../models/Lead";
 import { HashtagDiscovery } from "../models/HashtagDiscovery";
 import { scrapeQueue, SCRAPE_PROFILE_JOB_NAME } from "../queues/scrapeQueue";
 import { setupWorkerLogger } from "../utils/logger";
+import { getSystemSettings } from "../models/SystemSettings";
 
 // Setup logging interceptor
 setupWorkerLogger("discovery");
@@ -58,7 +59,8 @@ const worker = new Worker<DiscoveryJobData>(
         totalCount: 0,
       });
 
-      const result = await scrapeHashtag(cleanHashtag, { maxPosts: 50 });
+      const settings = await getSystemSettings();
+      const result = await scrapeHashtag(cleanHashtag, { maxPosts: settings.maxHashtagPosts });
 
       // Update progress: finished scraping, starting processing
       await job.updateProgress({

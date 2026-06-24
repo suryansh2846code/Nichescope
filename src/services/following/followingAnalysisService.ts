@@ -1,4 +1,5 @@
 import { SeedInfluencer } from "../../models/SeedInfluencer";
+import { getSystemSettings } from "../../models/SystemSettings";
 
 export interface FollowingAnalysisResult {
   followingBoost: number;
@@ -43,11 +44,14 @@ export async function analyzeFollowingList(
   const overlapCount = matchedHandles.length;
   const totalFollowings = followingHandles.length;
 
-  // Calculate boost: (overlaps / totalFollowings) * 30
-  // Clamped between 0 and 30.
+  const settings = await getSystemSettings();
+  const boostWeight = settings.followingBoostWeight ?? 30;
+
+  // Calculate boost: (overlaps / totalFollowings) * boostWeight
+  // Clamped between 0 and boostWeight.
   const followingBoost = Math.max(
     0,
-    Math.min(30, Math.round((overlapCount / totalFollowings) * 30))
+    Math.min(boostWeight, Math.round((overlapCount / totalFollowings) * boostWeight))
   );
 
   console.log(`Following Analysis for niche "${niche}": overlap=${overlapCount}/${totalFollowings}, boost=${followingBoost}`);

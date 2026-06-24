@@ -130,6 +130,35 @@ router.post("/influencers/trigger", async (req, res, next) => {
   }
 });
 
+// POST /discover/influencers/:username/run
+router.post("/influencers/:username/run", async (req, res, next) => {
+  try {
+    const { username } = req.params;
+    const cleanUsername = username.replace(/^@/, "").trim().toLowerCase();
+    
+    const influencer = await SeedInfluencer.findOne({ username: cleanUsername });
+    const niche = influencer?.niche || "fitness";
+
+    const jobId = `discover-${cleanUsername}-${Date.now()}`;
+    const job = await influencerDiscoveryQueue.add(
+      INFLUENCER_DISCOVER_JOB_NAME,
+      {
+        username: cleanUsername,
+        niche
+      },
+      { jobId }
+    );
+
+    res.status(202).json({
+      jobId: job.id,
+      status: "queued",
+      message: `Influencer post discovery triggered for @${cleanUsername}`
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /discover/influencers/:username/leads
 router.get("/influencers/:username/leads", async (req, res, next) => {
   try {

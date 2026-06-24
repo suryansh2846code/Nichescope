@@ -10,6 +10,7 @@ import {
   influencerDiscoveryQueue,
   commentScrapeQueue,
   commentAnalysisQueue,
+  INFLUENCER_DISCOVER_JOB_NAME,
 } from "../queues/commentQueues";
 
 const router = Router();
@@ -64,6 +65,36 @@ router.post("/trigger-scenario", async (req, res, next) => {
     );
 
     res.json({ jobId, message: `Scenario ${scenario} triggered for @${username}` });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/test-influencer-discovery/:scenario", async (req, res, next) => {
+  try {
+    const { scenario } = req.params;
+    const validScenarios = ["influencer-private", "influencer-no-posts"];
+    
+    if (!validScenarios.includes(scenario)) {
+      res.status(400).json({ error: `Invalid scenario. Valid: ${validScenarios.join(", ")}` });
+      return;
+    }
+    
+    const jobId = `discover-test-${scenario}-${Date.now()}`;
+    const job = await influencerDiscoveryQueue.add(
+      INFLUENCER_DISCOVER_JOB_NAME,
+      {
+        username: "test_influencer",
+        niche: "fitness",
+        testScenario: scenario
+      },
+      { jobId }
+    );
+    
+    res.json({ 
+      jobId: job.id, 
+      message: `Test scenario queued: ${scenario}` 
+    });
   } catch (err) {
     next(err);
   }

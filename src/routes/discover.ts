@@ -31,17 +31,23 @@ router.get("/influencers", async (req, res, next) => {
         const postUrls = posts.map(p => p.postUrl).filter(Boolean);
         
         let leadsCount = 0;
+        let commentsCount = 0;
         if (postUrls.length > 0) {
           const uniqueCommenters = await CommentAnalysis.distinct("username", {
             postUrl: { $in: postUrls },
             isLead: true
           });
           leadsCount = uniqueCommenters.length;
+          commentsCount = await CommentAnalysis.countDocuments({
+            postUrl: { $in: postUrls }
+          });
         }
         
         return {
           ...inf.toObject(),
-          leadsCount
+          leadsCount,
+          postsCount: posts.length,
+          commentsCount
         };
       })
     );
@@ -137,6 +143,11 @@ router.post("/influencers/:username/run", async (req, res, next) => {
     const cleanUsername = username.replace(/^@/, "").trim().toLowerCase();
     
     const influencer = await SeedInfluencer.findOne({ username: cleanUsername });
+    if (influencer) {
+      influencer.isProcessed = false;
+      influencer.isActive = true;
+      await influencer.save();
+    }
     const niche = influencer?.niche || "fitness";
 
     const jobId = `discover-${cleanUsername}-${Date.now()}`;

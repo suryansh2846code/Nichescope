@@ -430,6 +430,24 @@ export default function App() {
     }
   };
 
+  const handleRunInfluencer = async (username: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/discover/influencers/${username}/run`, {
+        method: "POST"
+      });
+      if (res.ok) {
+        alert(`Manually triggered scan for @${username}!`);
+        fetchInfluencers();
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to trigger scan");
+      }
+    } catch (err) {
+      console.error("Error triggering scan:", err);
+      alert("Network error triggering scan");
+    }
+  };
+
   const handleTriggerInfluencerScan = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/discover/influencers/trigger`, {
@@ -1667,173 +1685,255 @@ export default function App() {
             )}
           </div>
         </div>
-      ) */}
+      {activeTab === "seed-influencers" && (() => {
+        const activeInfluencers = influencers.filter(inf => !inf.isProcessed);
+        const processedInfluencers = influencers.filter(inf => inf.isProcessed);
+        return (
+          <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
+            {/* Page Help / Description Panel */}
+            <div className="glass-card page-description-banner" style={{ marginBottom: "1.5rem" }}>
+              <h3>🎯 Seed Influencer Registry</h3>
+              <p>
+                Manage seed influencer accounts within your target niche. The system monitors their posts and comment feeds to identify potential buyers asking questions or seeking recommendations.
+              </p>
+            </div>
 
-      {activeTab === "seed-influencers" && (
-        <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
-          {/* Page Help / Description Panel */}
-          <div className="glass-card page-description-banner" style={{ marginBottom: "1.5rem" }}>
-            <h3>🎯 Seed Influencer Registry</h3>
-            <p>
-              Manage seed influencer accounts within your target niche. The system monitors their posts and comment feeds to identify potential buyers asking questions or seeking recommendations.
-            </p>
-          </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "2rem", alignItems: "start" }}>
+              <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>🎯 Manage Seed Influencers</h3>
+                <form onSubmit={handleAddInfluencer} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                  <div className="input-group" style={{ margin: 0 }}>
+                    <label>Instagram Username</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. janesmith_fitness"
+                      value={newInfluencerUsername}
+                      onChange={(e) => setNewInfluencerUsername(e.target.value)}
+                      className="input-field"
+                      style={{
+                        background: "rgba(255, 255, 255, 0.03)",
+                        border: "var(--glass-border)",
+                        borderRadius: "8px",
+                        color: "#fff",
+                        padding: "0.75rem",
+                        outline: "none"
+                      }}
+                    />
+                  </div>
+                  <div className="input-group" style={{ margin: 0 }}>
+                    <label>Target Niche</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. fitness, real_estate"
+                      value={newInfluencerNiche}
+                      onChange={(e) => setNewInfluencerNiche(e.target.value)}
+                      className="input-field"
+                      style={{
+                        background: "rgba(255, 255, 255, 0.03)",
+                        border: "var(--glass-border)",
+                        borderRadius: "8px",
+                        color: "#fff",
+                        padding: "0.75rem",
+                        outline: "none"
+                      }}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                  >
+                    Add Seed Influencer
+                  </button>
+                </form>
+                {influencerError && <div className="toast toast-error">{influencerError}</div>}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "2rem", alignItems: "start" }}>
-            <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-              <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>🎯 Manage Seed Influencers</h3>
-              <form onSubmit={handleAddInfluencer} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                <div className="input-group" style={{ margin: 0 }}>
-                  <label>Instagram Username</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. janesmith_fitness"
-                    value={newInfluencerUsername}
-                    onChange={(e) => setNewInfluencerUsername(e.target.value)}
-                    className="input-field"
-                    style={{
-                      background: "rgba(255, 255, 255, 0.03)",
-                      border: "var(--glass-border)",
-                      borderRadius: "8px",
-                      color: "#fff",
-                      padding: "0.75rem",
-                      outline: "none"
-                    }}
-                  />
+                <div className="glass-card" style={{ padding: "1rem", marginTop: "1rem", background: "rgba(0,0,0,0.2)" }}>
+                  <h4 style={{ color: "#fff", fontSize: "0.9rem", marginBottom: "0.5rem" }}>⚙️ Control Center</h4>
+                  <p style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "1rem" }}>
+                    Trigger a manual scan of all active seed influencers. This checks their 5 most recent posts for new comments to scrape and analyze.
+                  </p>
+                  <button
+                    onClick={handleTriggerInfluencerScan}
+                    className="btn btn-secondary"
+                    style={{ width: "100%" }}
+                  >
+                    🚀 Run Discovery Scan Now
+                  </button>
                 </div>
-                <div className="input-group" style={{ margin: 0 }}>
-                  <label>Target Niche</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. fitness, real_estate"
-                    value={newInfluencerNiche}
-                    onChange={(e) => setNewInfluencerNiche(e.target.value)}
-                    className="input-field"
-                    style={{
-                      background: "rgba(255, 255, 255, 0.03)",
-                      border: "var(--glass-border)",
-                      borderRadius: "8px",
-                      color: "#fff",
-                      padding: "0.75rem",
-                      outline: "none"
-                    }}
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                >
-                  Add Seed Influencer
-                </button>
-              </form>
-              {influencerError && <div className="toast toast-error">{influencerError}</div>}
+              </div>
 
-              <div className="glass-card" style={{ padding: "1rem", marginTop: "1rem", background: "rgba(0,0,0,0.2)" }}>
-                <h4 style={{ color: "#fff", fontSize: "0.9rem", marginBottom: "0.5rem" }}>⚙️ Control Center</h4>
-                <p style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "1rem" }}>
-                  Trigger a manual scan of all active seed influencers. This checks their 5 most recent posts for new comments to scrape and analyze.
-                </p>
-                <button
-                  onClick={handleTriggerInfluencerScan}
-                  className="btn btn-secondary"
-                  style={{ width: "100%" }}
-                >
-                  🚀 Run Discovery Scan Now
-                </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                {/* Table 1: Active Monitoring Targets */}
+                <div className="glass-card card-table">
+                  <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>🎯 Active Monitoring Targets ({activeInfluencers.length})</h3>
+                  {activeInfluencers.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "2.5rem", color: "var(--color-text-dim)" }}>
+                      No active seed influencers in queue. Add targets or re-activate processed seeds.
+                    </div>
+                  ) : (
+                    <div className="table-responsive">
+                      <table className="leads-table">
+                        <thead>
+                          <tr>
+                            <th>Username</th>
+                            <th>Niche</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeInfluencers.map((inf, idx) => (
+                            <tr key={idx} className="lead-row">
+                              <td style={{ fontWeight: "bold" }}>@{inf.username}</td>
+                              <td>
+                                <span style={{
+                                  background: "rgba(0, 186, 255, 0.1)",
+                                  color: "#00baff",
+                                  padding: "0.2rem 0.5rem",
+                                  borderRadius: "4px",
+                                  fontSize: "0.75rem",
+                                  fontWeight: "bold"
+                                }}>
+                                  {inf.niche}
+                                </span>
+                              </td>
+                              <td>
+                                <span className={`status-badge ${inf.isActive ? "status-active" : "status-failed"}`} style={{
+                                  background: inf.isActive ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)",
+                                  color: inf.isActive ? "#22c55e" : "#ef4444",
+                                  borderColor: inf.isActive ? "#22c55e" : "#ef4444"
+                                }}>
+                                  {inf.isActive ? "Active" : "Paused"}
+                                </span>
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", gap: "0.5rem" }}>
+                                  <button
+                                    onClick={() => handleRunInfluencer(inf.username)}
+                                    className="btn btn-primary"
+                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
+                                    disabled={!inf.isActive}
+                                    title={inf.isActive ? "Start discovery scan" : "Activate first to scan"}
+                                  >
+                                    ⚡ Run Scan
+                                  </button>
+                                  <button
+                                    onClick={() => handleToggleInfluencer(inf.username)}
+                                    className="btn btn-secondary"
+                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
+                                  >
+                                    {inf.isActive ? "Pause" : "Activate"}
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteInfluencer(inf.username)}
+                                    className="btn btn-secondary"
+                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#ff4566", borderColor: "rgba(255,69,102,0.3)" }}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Table 2: Processed Seeds Summary */}
+                <div className="glass-card card-table">
+                  <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>✅ Processed Seeds Summary ({processedInfluencers.length})</h3>
+                  {processedInfluencers.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "2.5rem", color: "var(--color-text-dim)" }}>
+                      No completed scans yet. Run scans on active targets to view summaries.
+                    </div>
+                  ) : (
+                    <div className="table-responsive">
+                      <table className="leads-table">
+                        <thead>
+                          <tr>
+                            <th>Username</th>
+                            <th>Niche</th>
+                            <th>Processed Date</th>
+                            <th>Scrape Stats</th>
+                            <th>Leads Count</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {processedInfluencers.map((inf, idx) => (
+                            <tr key={idx} className="lead-row">
+                              <td style={{ fontWeight: "bold" }}>@{inf.username}</td>
+                              <td>
+                                <span style={{
+                                  background: "rgba(34, 197, 94, 0.1)",
+                                  color: "#22c55e",
+                                  padding: "0.2rem 0.5rem",
+                                  borderRadius: "4px",
+                                  fontSize: "0.75rem",
+                                  fontWeight: "bold"
+                                }}>
+                                  {inf.niche}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>
+                                {inf.processedAt ? new Date(inf.processedAt).toLocaleString() : "Recently"}
+                              </td>
+                              <td style={{ fontSize: "0.8rem" }}>
+                                <div style={{ display: "flex", gap: "0.5rem", color: "var(--color-text-dim)" }}>
+                                  <span>posts: <strong style={{ color: "#fff" }}>{inf.postsCount || 0}</strong></span>
+                                  <span>comments: <strong style={{ color: "#fff" }}>{inf.commentsCount || 0}</strong></span>
+                                </div>
+                              </td>
+                              <td>
+                                <button
+                                  onClick={() => fetchInfluencerLeads(inf.username)}
+                                  style={{
+                                    background: inf.leadsCount > 0 ? "rgba(167, 139, 250, 0.15)" : "rgba(255, 255, 255, 0.03)",
+                                    border: inf.leadsCount > 0 ? "1px solid #a78bfa" : "var(--glass-border)",
+                                    color: inf.leadsCount > 0 ? "#c084fc" : "var(--color-text-dim)",
+                                    padding: "0.25rem 0.6rem",
+                                    borderRadius: "6px",
+                                    fontSize: "0.8rem",
+                                    fontWeight: "bold",
+                                    cursor: "pointer",
+                                    transition: "all 0.2s"
+                                  }}
+                                >
+                                  💡 {inf.leadsCount || 0} Leads
+                                </button>
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", gap: "0.5rem" }}>
+                                  <button
+                                    onClick={() => handleRunInfluencer(inf.username)}
+                                    className="btn btn-secondary"
+                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "var(--color-accent)", borderColor: "rgba(0, 186, 255, 0.3)" }}
+                                  >
+                                    🔄 Run Again
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteInfluencer(inf.username)}
+                                    className="btn btn-secondary"
+                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#ff4566", borderColor: "rgba(255,69,102,0.3)" }}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-
-            <div className="glass-card card-table">
-              <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>Seed Influencer Registry</h3>
-              {influencers.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "3rem", color: "var(--color-text-dim)" }}>
-                  No seed influencers registered. Add your first seed influencer to start discovery.
-                </div>
-              ) : (
-                <div className="table-responsive">
-                  <table className="leads-table">
-                    <thead>
-                      <tr>
-                        <th>Username</th>
-                        <th>Niche</th>
-                        <th>Qualified Leads</th>
-                        <th>Status</th>
-                        <th>Last Post Processed</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {influencers.map((inf, idx) => (
-                        <tr key={idx} className="lead-row">
-                          <td style={{ fontWeight: "bold" }}>@{inf.username}</td>
-                          <td>
-                            <span style={{
-                              background: "rgba(0, 186, 255, 0.1)",
-                              color: "#00baff",
-                              padding: "0.2rem 0.5rem",
-                              borderRadius: "4px",
-                              fontSize: "0.75rem",
-                              fontWeight: "bold"
-                            }}>
-                              {inf.niche}
-                            </span>
-                          </td>
-                          <td>
-                            <button
-                              onClick={() => fetchInfluencerLeads(inf.username)}
-                              style={{
-                                background: inf.leadsCount > 0 ? "rgba(167, 139, 250, 0.15)" : "rgba(255, 255, 255, 0.03)",
-                                border: inf.leadsCount > 0 ? "1px solid #a78bfa" : "var(--glass-border)",
-                                color: inf.leadsCount > 0 ? "#c084fc" : "var(--color-text-dim)",
-                                padding: "0.25rem 0.6rem",
-                                borderRadius: "6px",
-                                fontSize: "0.8rem",
-                                fontWeight: "bold",
-                                cursor: "pointer",
-                                transition: "all 0.2s"
-                              }}
-                            >
-                              💡 {inf.leadsCount || 0} Leads
-                            </button>
-                          </td>
-                          <td>
-                            <span className={`status-badge ${inf.isActive ? "status-active" : "status-failed"}`} style={{
-                              background: inf.isActive ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)",
-                              color: inf.isActive ? "#22c55e" : "#ef4444",
-                              borderColor: inf.isActive ? "#22c55e" : "#ef4444"
-                            }}>
-                              {inf.isActive ? "Active" : "Paused"}
-                            </span>
-                          </td>
-                          <td style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>
-                            {inf.lastProcessedPostId || "None"}
-                          </td>
-                          <td>
-                            <div style={{ display: "flex", gap: "0.5rem" }}>
-                              <button
-                                onClick={() => handleToggleInfluencer(inf.username)}
-                                className="btn btn-secondary"
-                                style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
-                              >
-                                {inf.isActive ? "Pause" : "Activate"}
-                              </button>
-                              <button
-                                onClick={() => handleDeleteInfluencer(inf.username)}
-                                className="btn btn-secondary"
-                                style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#ff4566", borderColor: "rgba(255,69,102,0.3)" }}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
           </div>
+        );
+      })()}
 
           {/* Detailed Leads Panel for Selected Influencer */}
           {selectedInfluencerForLeads && (
@@ -2932,6 +3032,86 @@ export default function App() {
                   >
                     🔥 Launch 5 Parallel Mock Jobs
                   </button>
+                </div>
+
+                {/* Seed Influencer Scenarios */}
+                <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "1.25rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <h4 style={{ color: "#fff", fontSize: "1rem", fontWeight: "bold", margin: 0 }}>🎯 Seed Influencer Discovery Mocks</h4>
+                      <p style={{ color: "var(--color-text-dim)", fontSize: "0.8rem", margin: "0.15rem 0 0 0" }}>
+                        Simulate influencer discovery scanning and lead extraction cycles.
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "0.5rem" }}>
+                    <button
+                      onClick={async () => {
+                        setDevError(null);
+                        setDevSuccessMessage(null);
+                        setDevSubmitting(true);
+                        try {
+                          const res = await fetch(`${API_BASE_URL}/dev/test-influencer-discovery/influencer-success`, { method: "POST" });
+                          if (!res.ok) throw new Error("Failed to trigger mock success run");
+                          setDevSuccessMessage("Simulated seed influencer success scan triggered!");
+                          fetchInfluencers();
+                        } catch (err) {
+                          setDevError(err instanceof Error ? err.message : "Error triggering scan");
+                        } finally {
+                          setDevSubmitting(false);
+                        }
+                      }}
+                      className="btn btn-secondary"
+                      style={{ flex: 1, border: "1px solid rgba(34, 197, 94, 0.3)", color: "#22c55e", background: "rgba(34, 197, 94, 0.03)" }}
+                      disabled={devSubmitting}
+                    >
+                      🚀 Success Run (@test_influencer)
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setDevError(null);
+                        setDevSuccessMessage(null);
+                        setDevSubmitting(true);
+                        try {
+                          const res = await fetch(`${API_BASE_URL}/dev/test-influencer-discovery/influencer-private`, { method: "POST" });
+                          if (!res.ok) throw new Error("Failed to trigger mock private run");
+                          setDevSuccessMessage("Simulated seed influencer private skip triggered!");
+                          fetchInfluencers();
+                        } catch (err) {
+                          setDevError(err instanceof Error ? err.message : "Error triggering scan");
+                        } finally {
+                          setDevSubmitting(false);
+                        }
+                      }}
+                      className="btn btn-secondary"
+                      style={{ flex: 1 }}
+                      disabled={devSubmitting}
+                    >
+                      🔒 Private Skip
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setDevError(null);
+                        setDevSuccessMessage(null);
+                        setDevSubmitting(true);
+                        try {
+                          const res = await fetch(`${API_BASE_URL}/dev/test-influencer-discovery/influencer-no-posts`, { method: "POST" });
+                          if (!res.ok) throw new Error("Failed to trigger mock no-posts run");
+                          setDevSuccessMessage("Simulated seed influencer no posts skip triggered!");
+                          fetchInfluencers();
+                        } catch (err) {
+                          setDevError(err instanceof Error ? err.message : "Error triggering scan");
+                        } finally {
+                          setDevSubmitting(false);
+                        }
+                      }}
+                      className="btn btn-secondary"
+                      style={{ flex: 1 }}
+                      disabled={devSubmitting}
+                    >
+                      📭 No Posts Skip
+                    </button>
+                  </div>
                 </div>
 
               </div>

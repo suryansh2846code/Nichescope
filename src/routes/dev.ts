@@ -12,6 +12,7 @@ import {
   commentAnalysisQueue,
   INFLUENCER_DISCOVER_JOB_NAME,
 } from "../queues/commentQueues";
+import { SeedInfluencer } from "../models/SeedInfluencer";
 
 const router = Router();
 
@@ -73,12 +74,19 @@ router.post("/trigger-scenario", async (req, res, next) => {
 router.post("/test-influencer-discovery/:scenario", async (req, res, next) => {
   try {
     const { scenario } = req.params;
-    const validScenarios = ["influencer-private", "influencer-no-posts"];
+    const validScenarios = ["influencer-private", "influencer-no-posts", "influencer-success"];
     
     if (!validScenarios.includes(scenario)) {
       res.status(400).json({ error: `Invalid scenario. Valid: ${validScenarios.join(", ")}` });
       return;
     }
+
+    // Ensure the seed influencer exists in the registry, and reset its processed status
+    await SeedInfluencer.findOneAndUpdate(
+      { username: "test_influencer" },
+      { username: "test_influencer", niche: "fitness", isActive: true, isProcessed: false, processedAt: undefined },
+      { upsert: true, new: true }
+    );
     
     const jobId = `discover-test-${scenario}-${Date.now()}`;
     const job = await influencerDiscoveryQueue.add(

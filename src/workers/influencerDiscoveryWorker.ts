@@ -55,6 +55,19 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
         };
       }
 
+      if (testScenario === "influencer-success") {
+        console.log(`Influencer @${cleanInfluencer} success mock — returning mock posts`);
+        return {
+          influencerUsername: cleanInfluencer,
+          niche,
+          discoveredPostUrls: [
+            "https://www.instagram.com/p/mock-post-1/",
+            "https://www.instagram.com/p/mock-post-2/",
+          ],
+          status: "success" as const
+        };
+      }
+
       let discoveredPostUrls: string[] = [];
 
       try {
@@ -116,6 +129,10 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
       const result = await scanInfluencer(cleanInfluencer, niche);
       
       if (result.status === "skipped") {
+        await SeedInfluencer.updateOne(
+          { username: cleanInfluencer },
+          { $set: { isProcessed: true, isActive: false, processedAt: new Date(), updatedAt: new Date() } }
+        );
         return result;
       }
       
@@ -129,7 +146,15 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
         
         await SeedInfluencer.updateOne(
           { username: cleanInfluencer },
-          { $set: { lastProcessedPostId: latestPostId, updatedAt: new Date() } }
+          { 
+            $set: { 
+              lastProcessedPostId: latestPostId, 
+              isProcessed: true, 
+              isActive: false, 
+              processedAt: new Date(),
+              updatedAt: new Date() 
+            } 
+          }
         );
 
         for (const postUrl of urls) {
@@ -147,6 +172,19 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
           );
           totalEnqueued++;
         }
+      } else {
+        // No posts found but still processed
+        await SeedInfluencer.updateOne(
+          { username: cleanInfluencer },
+          { 
+            $set: { 
+              isProcessed: true, 
+              isActive: false, 
+              processedAt: new Date(),
+              updatedAt: new Date() 
+            } 
+          }
+        );
       }
       
       return {
@@ -168,6 +206,11 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
         try {
           const result = await scanInfluencer(cleanInfluencer, influencer.niche);
           if (result.status === "skipped") {
+            influencer.isProcessed = true;
+            influencer.isActive = false;
+            influencer.processedAt = new Date();
+            influencer.updatedAt = new Date();
+            await influencer.save();
             continue;
           }
           
@@ -180,6 +223,9 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
             const latestPostId = getPostId(urls[0]!);
             
             influencer.lastProcessedPostId = latestPostId;
+            influencer.isProcessed = true;
+            influencer.isActive = false;
+            influencer.processedAt = new Date();
             influencer.updatedAt = new Date();
             await influencer.save();
 
@@ -198,6 +244,12 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
               );
               totalEnqueued++;
             }
+          } else {
+            influencer.isProcessed = true;
+            influencer.isActive = false;
+            influencer.processedAt = new Date();
+            influencer.updatedAt = new Date();
+            await influencer.save();
           }
         } catch (err) {
           console.error(

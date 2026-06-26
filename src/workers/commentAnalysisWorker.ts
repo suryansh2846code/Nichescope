@@ -125,6 +125,21 @@ const worker = new Worker<CommentAnalysisJobData>(
         `Failed to analyze comment for @${normalizedUser}:`,
         err instanceof Error ? err.message : String(err)
       );
+      if (sessionId) {
+        try {
+          await discoveryEmitter.emit(sessionId, "comment_analyzed", {
+            username: normalizedUser,
+            comment: commentText,
+            isLead: false,
+            category: "general",
+            intent: "other",
+            confidence: 0,
+            timestamp: new Date()
+          });
+        } catch (emitErr) {
+          console.error("Failed to emit comment_analyzed fallback on error:", emitErr);
+        }
+      }
       throw err;
     }
   },

@@ -141,6 +141,7 @@ export async function processLeadQualificationJob(job: {
       username: normalizedUser,
       score: finalScore,
       bio: lead?.bio || "",
+      niche: lead?.niche || userIntel.overallCategory || "",
       followerCount: lead?.followerCount || 0,
       matchedSeedInfluencers: lead?.matchedSeedInfluencers || [],
       followingBoost: followingBoost,

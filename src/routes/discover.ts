@@ -191,56 +191,58 @@ router.post("/influencers/:username/run", async (req, res, next) => {
   }
 });
 
-// POST /discover/niche/:niche/run
-router.post("/niche/:niche/run", async (req, res, next) => {
+// POST /discover/run-niche-scan
+router.post("/run-niche-scan", async (req, res, next) => {
   try {
-    const { niche } = req.params;
-    if (!niche) {
-      res.status(400).json({ error: "Niche parameter is required" });
+    const { niche, usernames } = req.body;
+    if (!niche || typeof niche !== "string" || niche.trim() === "") {
+      res.status(400).json({ error: "niche parameter is required and must be a non-empty string" });
       return;
     }
+    if (!Array.isArray(usernames)) {
+      res.status(400).json({ error: "usernames parameter is required and must be an array" });
+      return;
+    }
+
     const cleanNiche = niche.trim().toLowerCase();
+    const cleanedUsernames = usernames
+      .map(u => (u || "").replace(/^@/, "").trim().toLowerCase())
+      .filter(Boolean);
 
-    // 1. Find all active influencers in this niche
-    const activeInfluencers = await SeedInfluencer.find({
-      niche: cleanNiche,
-      isActive: true
-    });
+    const count = cleanedUsernames.length;
 
-    const count = activeInfluencers.length;
-
-    // 2. Enforce constraint: 1 to 5 active users per process
+    // Validate size: 1 to 5
     if (count === 0) {
       res.status(400).json({
-        error: `No active influencers found in niche "${niche}". Please add or activate at least 1 influencer.`
+        error: "At least 1 seed influencer is required to start the scan."
       });
       return;
     }
 
     if (count > 5) {
       res.status(400).json({
-        error: `A niche process can run a maximum of 5 influencers. Niche "${niche}" has ${count} active influencers. Please pause/deactivate some to meet this limit.`
+        error: "You can run a scan for a maximum of 5 influencers at a time."
       });
       return;
     }
 
-    // 3. Trigger discovery run for each influencer in the niche group
     const spawnedRuns = [];
     const timestamp = Date.now();
 
-    for (const influencer of activeInfluencers) {
-      const cleanUsername = influencer.username.toLowerCase().trim();
+    for (const username of cleanedUsernames) {
+      // Upsert into SeedInfluencer to register this influencer under the niche
+      await SeedInfluencer.findOneAndUpdate(
+        { username },
+        { username, niche: cleanNiche, isActive: true, isProcessed: false },
+        { upsert: true, returnDocument: "after" }
+      );
 
-      // Reset processing state
-      influencer.isProcessed = false;
-      await influencer.save();
-
-      const sessionId = `run-${cleanUsername}-${timestamp}`;
+      const sessionId = `run-${username}-${timestamp}`;
 
       // Initialize DiscoverySession in database
       await DiscoverySession.create({
         sessionId,
-        username: cleanUsername,
+        username,
         niche: cleanNiche,
         status: "running",
         stats: {
@@ -257,7 +259,7 @@ router.post("/niche/:niche/run", async (req, res, next) => {
       const job = await influencerDiscoveryQueue.add(
         INFLUENCER_DISCOVER_JOB_NAME,
         {
-          username: cleanUsername,
+          username,
           niche: cleanNiche,
           sessionId
         },
@@ -265,14 +267,14 @@ router.post("/niche/:niche/run", async (req, res, next) => {
       );
 
       spawnedRuns.push({
-        username: cleanUsername,
+        username,
         sessionId,
         jobId: job.id
       });
     }
 
     res.status(202).json({
-      message: `Niche group process started for "${niche}" with ${count} active influencers.`,
+      message: `Niche scan process started for "${niche}" with ${count} influencers.`,
       runs: spawnedRuns
     });
   } catch (error) {

@@ -318,8 +318,9 @@ export default function LiveDiscoveryPanel({
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Stepper Status Indicators */}
+      {/* Stepper Status Indicators */}
         <div className="glass-card" style={{ padding: "1.25rem", marginBottom: "1.5rem" }}>
           <h3 style={{ margin: "0 0 1rem 0", fontSize: "1.1rem" }}>⚙️ Discovery Pipeline Progress</h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem" }}>

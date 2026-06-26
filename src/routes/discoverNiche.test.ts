@@ -23,13 +23,14 @@ describe("Niche Group Scan API Endpoint", () => {
     await DiscoverySession.deleteMany({});
   });
 
-  const runRouteHandler = async (routePath: string, method: "POST", reqQuery: any = {}, reqParams: any = {}) => {
+  const runRouteHandler = async (routePath: string, method: "POST", body: any = {}) => {
     let resData: any = null;
     let resStatus = 200;
 
     const mockReq = {
-      query: reqQuery,
-      params: reqParams,
+      body,
+      query: {},
+      params: {},
       method,
     } as any;
 
@@ -67,48 +68,40 @@ describe("Niche Group Scan API Endpoint", () => {
     return { status: resStatus, data: resData };
   };
 
-  test("POST /discover/niche/:niche/run returns 400 if niche has 0 active influencers", async () => {
-    const { status, data } = await runRouteHandler("/niche/:niche/run", "POST", {}, { niche: "saas" });
+  test("POST /discover/run-niche-scan returns 400 if usernames array is empty", async () => {
+    const { status, data } = await runRouteHandler("/run-niche-scan", "POST", {
+      niche: "saas",
+      usernames: []
+    });
 
     expect(status).toBe(400);
-    expect(data.error).toContain('No active influencers found in niche "saas"');
+    expect(data.error).toContain("At least 1 seed influencer is required");
   });
 
-  test("POST /discover/niche/:niche/run returns 400 if niche has > 5 active influencers", async () => {
-    // Seed 6 active influencers under "fitness" niche
-    const influencers = Array.from({ length: 6 }).map((_, i) => ({
-      username: `fit_influencer_${i}`,
+  test("POST /discover/run-niche-scan returns 400 if usernames count is > 5", async () => {
+    const { status, data } = await runRouteHandler("/run-niche-scan", "POST", {
       niche: "fitness",
-      isActive: true,
-      isProcessed: false
-    }));
-    await SeedInfluencer.create(influencers);
-
-    const { status, data } = await runRouteHandler("/niche/:niche/run", "POST", {}, { niche: "fitness" });
+      usernames: ["u1", "u2", "u3", "u4", "u5", "u6"]
+    });
 
     expect(status).toBe(400);
-    expect(data.error).toContain("A niche process can run a maximum of 5 influencers");
+    expect(data.error).toContain("maximum of 5 influencers");
   });
 
-  test("POST /discover/niche/:niche/run runs successfully for 1 to 5 active influencers", async () => {
-    // Seed 3 active influencers in "beauty" niche, and 1 inactive
-    await SeedInfluencer.create([
-      { username: "beauty_inf_1", niche: "beauty", isActive: true },
-      { username: "beauty_inf_2", niche: "beauty", isActive: true },
-      { username: "beauty_inf_3", niche: "beauty", isActive: true },
-      { username: "beauty_inf_4", niche: "beauty", isActive: false },
-    ]);
-
+  test("POST /discover/run-niche-scan runs successfully for 1 to 5 influencers", async () => {
     const addedJobs: any[] = [];
     influencerDiscoveryQueue.add = async (name, data, opts) => {
       addedJobs.push({ name, data, opts });
       return { id: opts?.jobId } as any;
     };
 
-    const { status, data } = await runRouteHandler("/niche/:niche/run", "POST", {}, { niche: "beauty" });
+    const { status, data } = await runRouteHandler("/run-niche-scan", "POST", {
+      niche: "beauty",
+      usernames: ["beauty_inf_1", "beauty_inf_2", "beauty_inf_3"]
+    });
 
     expect(status).toBe(202);
-    expect(data.message).toContain('Niche group process started for "beauty" with 3 active influencers');
+    expect(data.message).toContain('Niche scan process started for "beauty" with 3 influencers');
     expect(data.runs.length).toBe(3);
     expect(addedJobs.length).toBe(3);
 

@@ -13,6 +13,7 @@ import {
   INFLUENCER_DISCOVER_JOB_NAME,
 } from "../queues/commentQueues";
 import { SeedInfluencer } from "../models/SeedInfluencer";
+import { DiscoverySession } from "../models/DiscoverySession";
 
 const router = Router();
 
@@ -88,19 +89,40 @@ router.post("/test-influencer-discovery/:scenario", async (req, res, next) => {
       { upsert: true, new: true }
     );
     
-    const jobId = `discover-test-${scenario}-${Date.now()}`;
+    const sessionId = `test-run-${scenario}-${Date.now()}`;
+
+    // Initialize DiscoverySession in database
+    await DiscoverySession.create({
+      sessionId,
+      username: "test_influencer",
+      niche: "fitness",
+      status: "running",
+      stats: {
+        postsFound: 0,
+        postsScraped: 0,
+        commentsExtracted: 0,
+        commentsAnalyzed: 0,
+        commentsQualified: 0,
+        leadsCreated: 0
+      },
+      events: [],
+      startedAt: new Date()
+    });
+
     const job = await influencerDiscoveryQueue.add(
       INFLUENCER_DISCOVER_JOB_NAME,
       {
         username: "test_influencer",
         niche: "fitness",
-        testScenario: scenario
+        testScenario: scenario,
+        sessionId
       },
-      { jobId }
+      { jobId: sessionId }
     );
     
     res.json({ 
       jobId: job.id, 
+      sessionId,
       message: `Test scenario queued: ${scenario}` 
     });
   } catch (err) {

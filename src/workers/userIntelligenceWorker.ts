@@ -35,8 +35,8 @@ export async function processUserIntelligenceJob(job: {
   updateProgress: (progress: number) => Promise<any>;
 }) {
   const provider = getAIProvider();
-  const { username } = job.data;
-  const normalizedUser = username.toLowerCase().trim();
+  const { username, sessionId } = (job.data as any) || {};
+  const normalizedUser = (username || "").toLowerCase().trim();
   console.log(`Starting User Intelligence aggregation for @${normalizedUser}`);
   await job.updateProgress(10);
 
@@ -304,7 +304,7 @@ export async function processUserIntelligenceJob(job: {
   try {
     await leadQualificationQueue.add(
       QUALIFY_LEAD_JOB_NAME,
-      { username: normalizedUser },
+      { username: normalizedUser, sessionId },
       { jobId: normalizedUser }
     );
     console.log(`Enqueued LeadQualification for user @${normalizedUser}`);

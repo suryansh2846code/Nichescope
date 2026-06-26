@@ -13,6 +13,8 @@ import { setupWorkerLogger } from "../utils/logger";
 import { Lead } from "../models/Lead";
 import { calculateLeadScore } from "../services/ai/scoring";
 import { getSystemSettings } from "../models/SystemSettings";
+import { CommentAnalysis } from "../models/CommentAnalysis";
+import { discoveryEmitter } from "../services/discovery/discoveryEventEmitter";
 
 setupWorkerLogger("qualification");
 
@@ -31,8 +33,8 @@ export async function processLeadQualificationJob(job: {
   updateProgress: (progress: number) => Promise<any>;
 }) {
   const provider = getAIProvider();
-  const { username } = job.data;
-  const normalizedUser = username.toLowerCase().trim();
+  const { username, sessionId } = (job.data as any) || {};
+  const normalizedUser = (username || "").toLowerCase().trim();
   console.log(`Starting Lead Qualification aggregation for @${normalizedUser}`);
   await job.updateProgress(10);
 
@@ -118,6 +120,26 @@ export async function processLeadQualificationJob(job: {
     },
     { upsert: true, returnDocument: "after" }
   );
+
+  if (sessionId) {
+    const comment = await CommentAnalysis.findOne({ username: normalizedUser, isLead: true }).sort({ analyzedAt: -1 });
+    await discoveryEmitter.emit(sessionId, "lead_created", {
+      username: normalizedUser,
+      score: finalScore,
+      bio: lead?.bio || "",
+      followerCount: lead?.followerCount || 0,
+      matchedSeedInfluencers: lead?.matchedSeedInfluencers || [],
+      followingBoost: followingBoost,
+      originComment: comment?.commentText || "Qualified comment",
+      qualification: {
+        problem: result.problem,
+        serviceNeeded: result.serviceNeeded,
+        urgency: result.urgency,
+        buyingIntent: result.buyingIntent,
+      },
+      timestamp: new Date()
+    });
+  }
 
   // 7. CRM initialization and automation hooks
   try {

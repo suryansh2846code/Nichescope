@@ -14,6 +14,7 @@ import devRouter from "./routes/dev";
 import logsRouter from "./routes/logs";
 import debugRouter from "./routes/debug";
 import settingsRouter from "./routes/settings";
+import { startWebSocketServer } from "./services/discovery/discoveryWebSocketServer";
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -108,6 +109,9 @@ app.use((error: unknown, req: express.Request, res: express.Response, next: expr
 app.listen(port, () => {
   console.log(`Server Running at http://localhost:${port}`);
   console.log(`Listening on ${port}`);
+
+  // Start Discovery WebSocket server on port 3002
+  startWebSocketServer(3002);
 
   connectToDatabase()
     .then(() => {

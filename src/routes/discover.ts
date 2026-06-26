@@ -9,12 +9,14 @@ import { SeedInfluencer } from "../models/SeedInfluencer";
 import { Post } from "../models/Post";
 import { CommentAnalysis } from "../models/CommentAnalysis";
 import { LeadQualification } from "../models/LeadQualification";
+import { DiscoverySession } from "../models/DiscoverySession";
 import {
   influencerDiscoveryQueue,
   INFLUENCER_DISCOVER_JOB_NAME,
 } from "../queues/commentQueues";
 
 const router = Router();
+
 
 // router.post("/hashtag", async (req, res, next) => {
 //   ... (rest of the unused router.post and router.get)
@@ -24,12 +26,12 @@ const router = Router();
 router.get("/influencers", async (req, res, next) => {
   try {
     const influencers = await SeedInfluencer.find().sort({ createdAt: -1 });
-    
+
     const enrichedInfluencers = await Promise.all(
       influencers.map(async (inf) => {
         const posts = await Post.find({ username: new RegExp(`^${inf.username}$`, "i") });
         const postUrls = posts.map(p => p.postUrl).filter(Boolean);
-        
+
         let leadsCount = 0;
         let commentsCount = 0;
         if (postUrls.length > 0) {
@@ -42,7 +44,7 @@ router.get("/influencers", async (req, res, next) => {
             postUrl: { $in: postUrls }
           });
         }
-        
+
         return {
           ...inf.toObject(),
           leadsCount,
@@ -141,7 +143,7 @@ router.post("/influencers/:username/run", async (req, res, next) => {
   try {
     const { username } = req.params;
     const cleanUsername = username.replace(/^@/, "").trim().toLowerCase();
-    
+
     const influencer = await SeedInfluencer.findOne({ username: cleanUsername });
     if (influencer) {
       influencer.isProcessed = false;
@@ -150,18 +152,37 @@ router.post("/influencers/:username/run", async (req, res, next) => {
     }
     const niche = influencer?.niche || "fitness";
 
-    const jobId = `discover-${cleanUsername}-${Date.now()}`;
+    const sessionId = `run-${cleanUsername}-${Date.now()}`;
+
+    // Initialize DiscoverySession in database
+    await DiscoverySession.create({
+      sessionId,
+      username: cleanUsername,
+      niche,
+      status: "running",
+      stats: {
+        postsFound: 0,
+        commentsExtracted: 0,
+        commentsQualified: 0,
+        leadsCreated: 0
+      },
+      events: [],
+      startedAt: new Date()
+    });
+
     const job = await influencerDiscoveryQueue.add(
       INFLUENCER_DISCOVER_JOB_NAME,
       {
         username: cleanUsername,
-        niche
+        niche,
+        sessionId
       },
-      { jobId }
+      { jobId: sessionId }
     );
 
     res.status(202).json({
       jobId: job.id,
+      sessionId,
       status: "queued",
       message: `Influencer post discovery triggered for @${cleanUsername}`
     });
@@ -175,28 +196,28 @@ router.get("/influencers/:username/leads", async (req, res, next) => {
   try {
     const { username } = req.params;
     const cleanUsername = username.replace(/^@/, "").trim().toLowerCase();
-    
+
     const posts = await Post.find({ username: new RegExp(`^${cleanUsername}$`, "i") });
     const postUrls = posts.map(p => p.postUrl).filter(Boolean);
-    
+
     if (postUrls.length === 0) {
       res.json([]);
       return;
     }
-    
+
     // Find all comment analyses on this influencer's posts that are leads
     const comments = await CommentAnalysis.find({
       postUrl: { $in: postUrls },
       isLead: true
     }).sort({ analyzedAt: -1 });
-    
+
     // Map comments to their corresponding LeadQualification data
     const leadsData = await Promise.all(
       comments.map(async (comment) => {
         const qualification = await LeadQualification.findOne({
           username: comment.username.toLowerCase()
         });
-        
+
         return {
           username: comment.username,
           commentText: comment.commentText,
@@ -208,7 +229,7 @@ router.get("/influencers/:username/leads", async (req, res, next) => {
         };
       })
     );
-    
+
     res.json(leadsData);
   } catch (error) {
     next(error);

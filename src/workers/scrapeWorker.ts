@@ -17,7 +17,8 @@ async function handleScrapeCompletionOrSkip(
   username: string,
   niche: string,
   hasProfileData: boolean,
-  triggerUserIntel: boolean
+  triggerUserIntel: boolean,
+  sessionId?: string
 ) {
   const cleanUser = username.toLowerCase().trim();
 
@@ -42,7 +43,7 @@ async function handleScrapeCompletionOrSkip(
     try {
       await userIntelligenceQueue.add(
         AGGREGATE_USER_JOB_NAME,
-        { username: cleanUser },
+        { username: cleanUser, sessionId }, // Propagate session
         { jobId: cleanUser }
       );
       console.log(`Enqueued UserIntelligence aggregation for @${cleanUser}`);
@@ -68,7 +69,8 @@ try {
 const worker = new Worker<ScrapeJobData>(
   SCRAPE_QUEUE_NAME,
   async (job) => {
-    const username = job.data.username.replace(/^@/, "").trim();
+    const { username: rawUsername, niche, sessionId } = (job.data as any) || {};
+    const username = (rawUsername || "").replace(/^@/, "").trim();
     console.log(`Starting scrape job ${job.id} for @${username}`);
     
     const startTime = Date.now();
@@ -150,7 +152,7 @@ const worker = new Worker<ScrapeJobData>(
       console.log("STEP 6: Saving posts");
       await saveOrUpdatePosts(username, posts);
 
-      await handleScrapeCompletionOrSkip(username, job.data.niche, true, posts.length === 0);
+      await handleScrapeCompletionOrSkip(username, niche, true, posts.length === 0, sessionId);
 
       currentStage = "Completed";
       await job.updateProgress({ percent: 100, stage: currentStage });
@@ -163,11 +165,11 @@ const worker = new Worker<ScrapeJobData>(
         postsScraped: posts.length,
         status: "success",
         profile,
-        niche: job.data.niche,
+        niche,
         maxFollowers: job.data.maxFollowers,
       };
     } catch (error: any) {
-      await handleScrapeCompletionOrSkip(username, job.data.niche, false, true);
+      await handleScrapeCompletionOrSkip(username, niche, false, true, sessionId);
 
       if (error.message === "TIMEOUT") {
         console.log(`Profile timeout reached for @${username}`);

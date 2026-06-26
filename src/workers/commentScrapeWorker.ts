@@ -10,6 +10,7 @@ import {
 import { scrapeComments } from "../scraper/instagram";
 import { setupWorkerLogger } from "../utils/logger";
 import { getSystemSettings } from "../models/SystemSettings";
+import { discoveryEmitter } from "../services/discovery/discoveryEventEmitter";
 
 // Setup logging interceptor
 setupWorkerLogger("comment-scraper");
@@ -27,7 +28,7 @@ try {
 const worker = new Worker<CommentScrapeJobData>(
   COMMENT_SCRAPE_QUEUE_NAME,
   async (job) => {
-    const { postUrl, niche } = job.data;
+    const { postUrl, niche, sessionId } = (job.data as any) || {};
     console.log(`Starting comment scrape job ${job.id} for post: ${postUrl}`);
 
     const match = postUrl.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
@@ -39,6 +40,19 @@ const worker = new Worker<CommentScrapeJobData>(
       let comments = await scrapeComments(postUrl);
       comments = comments.slice(0, settings.maxCommentsScraped);
       console.log(`Scraped ${comments.length} comments (limited by setting) for post ${postId}`);
+
+      if (sessionId) {
+        await discoveryEmitter.emit(sessionId, "comments_extracted", {
+          postId,
+          postUrl,
+          commentCount: comments.length,
+          newComments: comments.map(c => ({
+            username: c.username,
+            text: c.text,
+            timestamp: c.timestamp || new Date()
+          }))
+        });
+      }
 
       let enqueuedComments = 0;
 
@@ -62,6 +76,7 @@ const worker = new Worker<CommentScrapeJobData>(
             commentText,
             postUrl,
             niche,
+            sessionId, // Propagate session
           },
           { jobId: analysisJobId }
         );

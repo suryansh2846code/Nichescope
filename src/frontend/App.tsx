@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import LiveDiscoveryPanel from "./components/LiveDiscoveryPanel";
 
 const API_BASE_URL = "http://localhost:3001";
 
@@ -162,6 +163,7 @@ export default function App() {
   const [newInfluencerUsername, setNewInfluencerUsername] = useState("");
   const [newInfluencerNiche, setNewInfluencerNiche] = useState("");
   const [influencerError, setInfluencerError] = useState<string | null>(null);
+  const [activeSession, setActiveSession] = useState<{ sessionId: string; username: string; niche: string } | null>(null);
 
   // Seed Influencer Leads Modal State
   const [selectedInfluencerForLeads, setSelectedInfluencerForLeads] = useState<string | null>(null);
@@ -436,8 +438,19 @@ export default function App() {
         method: "POST"
       });
       if (res.ok) {
-        alert(`Manually triggered scan for @${username}!`);
-        fetchInfluencers();
+        const data = await res.json();
+        const niche = influencers.find(inf => inf.username.toLowerCase() === username.toLowerCase())?.niche || "fitness";
+        
+        if (data.sessionId) {
+          setActiveSession({
+            sessionId: data.sessionId,
+            username,
+            niche
+          });
+        } else {
+          alert(`Manually triggered scan for @${username}!`);
+          fetchInfluencers();
+        }
       } else {
         const err = await res.json();
         alert(err.error || "Failed to trigger scan");
@@ -1687,6 +1700,22 @@ export default function App() {
         </div>
       ) */}
       {activeTab === "seed-influencers" && (() => {
+        if (activeSession) {
+          return (
+            <LiveDiscoveryPanel
+              sessionId={activeSession.sessionId}
+              influencerUsername={activeSession.username}
+              niche={activeSession.niche}
+              onClose={() => {
+                setActiveSession(null);
+                fetchInfluencers();
+              }}
+              onAddToCrm={handleAddToCrm}
+              crmLeads={crmLeads}
+            />
+          );
+        }
+
         const activeInfluencers = influencers.filter(inf => !inf.isProcessed);
         const processedInfluencers = influencers.filter(inf => inf.isProcessed);
         return (
@@ -3052,8 +3081,18 @@ export default function App() {
                         try {
                           const res = await fetch(`${API_BASE_URL}/dev/test-influencer-discovery/influencer-success`, { method: "POST" });
                           if (!res.ok) throw new Error("Failed to trigger mock success run");
-                          setDevSuccessMessage("Simulated seed influencer success scan triggered!");
-                          fetchInfluencers();
+                          const data = await res.json();
+                          if (data.sessionId) {
+                            setActiveSession({
+                              sessionId: data.sessionId,
+                              username: "test_influencer",
+                              niche: "fitness"
+                            });
+                            setActiveTab("seed-influencers");
+                          } else {
+                            setDevSuccessMessage("Simulated seed influencer success scan triggered!");
+                            fetchInfluencers();
+                          }
                         } catch (err) {
                           setDevError(err instanceof Error ? err.message : "Error triggering scan");
                         } finally {
@@ -3074,8 +3113,18 @@ export default function App() {
                         try {
                           const res = await fetch(`${API_BASE_URL}/dev/test-influencer-discovery/influencer-private`, { method: "POST" });
                           if (!res.ok) throw new Error("Failed to trigger mock private run");
-                          setDevSuccessMessage("Simulated seed influencer private skip triggered!");
-                          fetchInfluencers();
+                          const data = await res.json();
+                          if (data.sessionId) {
+                            setActiveSession({
+                              sessionId: data.sessionId,
+                              username: "test_influencer",
+                              niche: "fitness"
+                            });
+                            setActiveTab("seed-influencers");
+                          } else {
+                            setDevSuccessMessage("Simulated seed influencer private skip triggered!");
+                            fetchInfluencers();
+                          }
                         } catch (err) {
                           setDevError(err instanceof Error ? err.message : "Error triggering scan");
                         } finally {
@@ -3096,8 +3145,18 @@ export default function App() {
                         try {
                           const res = await fetch(`${API_BASE_URL}/dev/test-influencer-discovery/influencer-no-posts`, { method: "POST" });
                           if (!res.ok) throw new Error("Failed to trigger mock no-posts run");
-                          setDevSuccessMessage("Simulated seed influencer no posts skip triggered!");
-                          fetchInfluencers();
+                          const data = await res.json();
+                          if (data.sessionId) {
+                            setActiveSession({
+                              sessionId: data.sessionId,
+                              username: "test_influencer",
+                              niche: "fitness"
+                            });
+                            setActiveTab("seed-influencers");
+                          } else {
+                            setDevSuccessMessage("Simulated seed influencer no posts skip triggered!");
+                            fetchInfluencers();
+                          }
                         } catch (err) {
                           setDevError(err instanceof Error ? err.message : "Error triggering scan");
                         } finally {

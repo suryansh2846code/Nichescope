@@ -7,6 +7,7 @@ import { Lead } from "../models/Lead";
 import { scrapeQueue, SCRAPE_PROFILE_JOB_NAME } from "../queues/scrapeQueue";
 import { getAIProvider } from "../services/ai/AIProvider";
 import { setupWorkerLogger } from "../utils/logger";
+import { discoveryEmitter } from "../services/discovery/discoveryEventEmitter";
 
 // Setup logging interceptor
 setupWorkerLogger("comment-analysis");
@@ -24,7 +25,7 @@ try {
 const worker = new Worker<CommentAnalysisJobData>(
   COMMENT_ANALYSIS_QUEUE_NAME,
   async (job) => {
-    const { username, commentText, postUrl, niche } = job.data;
+    const { username, commentText, postUrl, niche, sessionId } = (job.data as any) || {};
     const normalizedUser = username.toLowerCase().trim();
     console.log(`Starting AI analysis for comment by @${normalizedUser}: "${commentText.slice(0, 50)}..."`);
 
@@ -51,6 +52,18 @@ const worker = new Worker<CommentAnalysisJobData>(
         },
         { upsert: true, returnDocument: "after" }
       );
+
+      if (sessionId) {
+        await discoveryEmitter.emit(sessionId, "comment_analyzed", {
+          username: normalizedUser,
+          comment: commentText,
+          isLead: result.isLead,
+          category: result.category,
+          intent: result.intent,
+          confidence: result.confidence,
+          timestamp: new Date()
+        });
+      }
 
       // If the comment passes the AI lead gate, trigger a profile + following list scrape
       if (result.isLead) {
@@ -84,6 +97,7 @@ const worker = new Worker<CommentAnalysisJobData>(
             username: normalizedUser,
             niche,
             followingJobId, // Pass this so scrapeWorker can pick it up
+            sessionId, // Propagate session
           },
           { jobId: scrapeJobId }
         );

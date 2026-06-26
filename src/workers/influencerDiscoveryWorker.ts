@@ -10,6 +10,7 @@ import {
 import { SeedInfluencer } from "../models/SeedInfluencer";
 import { launchStealth, safeClose, collectRecentPostUrls } from "../scraper/instagram";
 import { setupWorkerLogger } from "../utils/logger";
+import { discoveryEmitter } from "../services/discovery/discoveryEventEmitter";
 
 // Setup logging interceptor
 setupWorkerLogger("influencer-discovery");
@@ -29,7 +30,7 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
   async (job) => {
     console.log(`Starting influencer discovery job ${job.id}`);
     
-    const { username, niche: jobNiche, testScenario } = job.data || {};
+    const { username, niche: jobNiche, testScenario, sessionId } = (job.data as any) || {};
     const POSTS_PER_RUN = 5;
     
     const scanInfluencer = async (cleanInfluencer: string, niche: string) => {
@@ -133,15 +134,22 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
           { username: cleanInfluencer },
           { $set: { isProcessed: true, isActive: false, processedAt: new Date(), updatedAt: new Date() } }
         );
+        if (sessionId) {
+          await discoveryEmitter.emit(sessionId, "error", {
+            reason: result.reason || "private_account",
+            message: `Influencer @${cleanInfluencer} is private or skipped.`
+          });
+        }
         return result;
       }
       
       const urls = result.discoveredPostUrls || [];
+      const getPostId = (url: string) => {
+        const match = url.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
+        return (match && match[1]) || url;
+      };
+
       if (urls.length > 0) {
-        const getPostId = (url: string) => {
-          const match = url.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
-          return (match && match[1]) || url;
-        };
         const latestPostId = getPostId(urls[0]!);
         
         await SeedInfluencer.updateOne(
@@ -157,6 +165,17 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
           }
         );
 
+        if (sessionId) {
+          const postsPayload = urls.map((url, idx) => ({
+            postId: getPostId(url),
+            url,
+            caption: `Post #${idx + 1}`,
+            comments_estimated: 10,
+            mediaType: "image"
+          }));
+          await discoveryEmitter.emit(sessionId, "posts_found", { posts: postsPayload });
+        }
+
         for (const postUrl of urls) {
           const postId = getPostId(postUrl);
           const jobId = `comments-${postId}`;
@@ -167,6 +186,7 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
             {
               postUrl,
               niche,
+              sessionId // Propagate session
             },
             { jobId } // Deduplicates at BullMQ queue level
           );
@@ -185,6 +205,12 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
             } 
           }
         );
+
+        if (sessionId) {
+          await discoveryEmitter.emit(sessionId, "completed", {
+            message: `Influencer @${cleanInfluencer} has 0 posts.`
+          });
+        }
       }
       
       return {

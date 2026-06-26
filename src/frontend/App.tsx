@@ -1932,9 +1932,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-          </div>
-        );
-      })()}
 
           {/* Detailed Leads Panel for Selected Influencer */}
           {selectedInfluencerForLeads && (
@@ -2050,8 +2047,9 @@ export default function App() {
               )}
             </div>
           )}
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       {activeTab === "qualified" && (
         <div className="inbox-container animate-fade-in" style={{ padding: "0 1rem" }}>

@@ -29,7 +29,7 @@ const worker = new Worker<CommentScrapeJobData>(
   COMMENT_SCRAPE_QUEUE_NAME,
   async (job) => {
     const { postUrl, niche, sessionId } = (job.data as any) || {};
-    
+
     const shouldProceed = await checkDiscoverySessionState(sessionId);
     if (!shouldProceed) return;
 
@@ -66,8 +66,8 @@ const worker = new Worker<CommentScrapeJobData>(
 
         if (!username || !commentText) continue;
 
-        // Generate a deterministic job ID to prevent duplicate analyses of the same comment
-        // Hash the comment text to avoid issues with special characters in job ID
+        // Deterministic job ID based on comment content — prevents duplicate analyses
+        // of the same comment. The same posts are never re-enqueued so deduplication is safe.
         const commentHash = Bun.hash(commentText).toString();
         const analysisJobId = `analyze-${username}-${postId}-${commentHash}`;
 
@@ -98,6 +98,18 @@ const worker = new Worker<CommentScrapeJobData>(
         `Failed to scrape comments for post ${postUrl}:`,
         err instanceof Error ? err.message : String(err)
       );
+      if (sessionId) {
+        try {
+          await discoveryEmitter.emit(sessionId, "comments_extracted", {
+            postId,
+            postUrl,
+            commentCount: 0,
+            newComments: []
+          });
+        } catch (emitErr) {
+          console.error("Failed to emit comments_extracted fallback on error:", emitErr);
+        }
+      }
       throw err;
     }
   },

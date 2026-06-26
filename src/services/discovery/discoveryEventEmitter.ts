@@ -57,6 +57,8 @@ class DiscoveryEventEmitter {
         updateQuery.$inc = { "stats.leadsCreated": 1 };
       } else if (type === "completed" || type === "stage_complete") {
         updateQuery.$set = { status: "completed", completedAt: timestamp };
+      } else if (type === "already_scanned") {
+        updateQuery.$set = { status: "already_scanned", completedAt: timestamp };
       } else if (type === "error" || type === "failed") {
         updateQuery.$set = { status: "failed", completedAt: timestamp };
       } else if (type === "paused") {
@@ -127,7 +129,8 @@ export async function checkDiscoverySessionState(sessionId: string | undefined):
     if (
       session.status === "failed" ||
       session.status === "completed" ||
-      session.status === "cancelled"
+      session.status === "cancelled" ||
+      session.status === "already_scanned"
     ) {
       console.log(`[DiscoveryControl] Session ${sessionId} is terminated with status "${session.status}". Discarding current job.`);
       return false; // Stop processing

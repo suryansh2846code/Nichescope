@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import LiveDiscoveryPanel from "./components/LiveDiscoveryPanel";
 import NicheLeadSearch from "./components/NicheLeadSearch";
+import InfluencerStatusDrawer from "./components/InfluencerStatusDrawer";
 
 const API_BASE_URL = "http://localhost:3001";
 
@@ -165,6 +166,8 @@ export default function App() {
   const [newInfluencerNiche, setNewInfluencerNiche] = useState("");
   const [influencerError, setInfluencerError] = useState<string | null>(null);
   const [activeSession, setActiveSession] = useState<{ sessionId: string; username: string; niche: string } | null>(null);
+  const [drawerSession, setDrawerSession] = useState<{ sessionId: string; username: string; niche: string } | null>(null);
+  const [isCreatingList, setIsCreatingList] = useState(false);
 
   // Seed Influencer Leads Modal State
   const [selectedInfluencerForLeads, setSelectedInfluencerForLeads] = useState<string | null>(null);
@@ -433,6 +436,52 @@ export default function App() {
     }
   };
 
+  const handleOpenDrawerForInfluencer = async (username: string) => {
+    try {
+      const niche = influencers.find(inf => inf.username.toLowerCase() === username.toLowerCase())?.niche || "";
+      const res = await fetch(`${API_BASE_URL}/discover/influencers/${username}/latest-session`);
+      if (res.ok) {
+        const data = await res.json();
+        setDrawerSession({
+          sessionId: data.sessionId,
+          username: data.username,
+          niche
+        });
+      } else {
+        alert(`No scan session exists for @${username}. Start a scan first to monitor its status.`);
+      }
+    } catch (err) {
+      console.error("Error fetching latest session for drawer:", err);
+      alert("Failed to fetch session status");
+    }
+  };
+
+  const handleRunNicheGroupScan = async (niche: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/discover/niche/${niche}/run`, {
+        method: "POST"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(data.message);
+        fetchInfluencers();
+        if (data.runs && data.runs.length > 0) {
+          setDrawerSession({
+            sessionId: data.runs[0].sessionId,
+            username: data.runs[0].username,
+            niche
+          });
+        }
+      } else {
+        const err = await res.json();
+        alert(err.error || "Failed to trigger niche group scan");
+      }
+    } catch (err) {
+      console.error("Error triggering group scan:", err);
+      alert("Network error triggering group scan");
+    }
+  };
+
   const handleRunInfluencer = async (username: string) => {
     try {
       const res = await fetch(`${API_BASE_URL}/discover/influencers/${username}/run`, {
@@ -443,11 +492,12 @@ export default function App() {
         const niche = influencers.find(inf => inf.username.toLowerCase() === username.toLowerCase())?.niche || "fitness";
         
         if (data.sessionId) {
-          setActiveSession({
+          setDrawerSession({
             sessionId: data.sessionId,
             username,
             niche
           });
+          fetchInfluencers();
         } else {
           alert(`Manually triggered scan for @${username}!`);
           fetchInfluencers();
@@ -1562,6 +1612,27 @@ export default function App() {
 
         const activeInfluencers = influencers.filter(inf => !inf.isProcessed);
         const processedInfluencers = influencers.filter(inf => inf.isProcessed);
+
+        if (influencers.length === 0 && !isCreatingList) {
+          return (
+            <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
+              <div className="glass-card page-description-banner" style={{ marginBottom: "1.5rem", textAlign: "center", padding: "3rem 1.5rem" }}>
+                <h3 style={{ fontSize: "1.8rem", fontWeight: "bold", margin: 0, color: "#fff" }}>🎯 Seed Influencer Registry</h3>
+                <p style={{ color: "var(--color-text-dim)", maxWidth: "500px", margin: "1rem auto 2rem auto", fontSize: "0.95rem", lineHeight: "1.5" }}>
+                  To start finding qualified leads, you need to add your target seed influencers. Choose a niche and input the list of key influencer accounts to scrape.
+                </p>
+                <button
+                  className="btn btn-primary animate-pulse"
+                  onClick={() => setIsCreatingList(true)}
+                  style={{ padding: "0.75rem 2.5rem", fontSize: "1.1rem" }}
+                >
+                  ✨ Make list of influencer
+                </button>
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
             {/* Page Help / Description Panel */}
@@ -1634,6 +1705,99 @@ export default function App() {
                     🚀 Run Discovery Scan Now
                   </button>
                 </div>
+
+                {/* Niche Group Scans Card */}
+                <div className="glass-card" style={{ padding: "1rem", marginTop: "1rem", background: "rgba(0,0,0,0.2)" }}>
+                  <h4 style={{ color: "#fff", fontSize: "0.9rem", marginBottom: "0.5rem" }}>⚡ Niche Group Scans</h4>
+                  <p style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "1rem" }}>
+                    Run scans for active influencers grouped by niche.
+                    <br />
+                    <em>Limit: 1 to 5 active seeds per process.</em>
+                  </p>
+                  {(() => {
+                    const nicheGroups: Record<string, { total: number; active: number }> = {};
+                    influencers.forEach(inf => {
+                      const n = (inf.niche || "").trim().toLowerCase();
+                      if (!n) return;
+                      if (!nicheGroups[n]) {
+                        nicheGroups[n] = { total: 0, active: 0 };
+                      }
+                      nicheGroups[n].total++;
+                      if (inf.isActive && !inf.isProcessed) {
+                        nicheGroups[n].active++;
+                      }
+                    });
+
+                    const uniqueNiches = Object.keys(nicheGroups);
+
+                    if (uniqueNiches.length === 0) {
+                      return (
+                        <div style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", textAlign: "center", padding: "0.5rem" }}>
+                          No niches found.
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                        {uniqueNiches.map(nicheName => {
+                          const group = nicheGroups[nicheName];
+                          const isValid = group.active >= 1 && group.active <= 5;
+                          const nicheLabel = nicheName.charAt(0).toUpperCase() + nicheName.slice(1);
+
+                          return (
+                            <div
+                              key={nicheName}
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                padding: "0.5rem",
+                                background: "rgba(255, 255, 255, 0.02)",
+                                border: "1px solid rgba(255, 255, 255, 0.04)",
+                                borderRadius: "6px"
+                              }}
+                            >
+                              <div>
+                                <div style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#fff" }}>
+                                  {nicheLabel}
+                                </div>
+                                <div style={{ fontSize: "0.7rem", color: "var(--color-text-dim)" }}>
+                                  {group.active} active / {group.total} total
+                                </div>
+                              </div>
+
+                              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.2rem" }}>
+                                <button
+                                  onClick={() => handleRunNicheGroupScan(nicheName)}
+                                  className="btn btn-primary"
+                                  style={{
+                                    padding: "0.25rem 0.5rem",
+                                    fontSize: "0.75rem",
+                                    margin: 0,
+                                    minWidth: "auto",
+                                    background: isValid ? "var(--color-accent)" : "rgba(255,255,255,0.05)",
+                                    borderColor: isValid ? "var(--color-accent)" : "transparent",
+                                    color: isValid ? "#fff" : "var(--color-text-dim)",
+                                    cursor: isValid ? "pointer" : "not-allowed"
+                                  }}
+                                  disabled={!isValid}
+                                >
+                                  🚀 Run Group
+                                </button>
+                                {!isValid && (
+                                  <span style={{ fontSize: "0.6rem", color: "#ff4566", fontWeight: "bold" }}>
+                                    {group.active === 0 ? "Requires ≥1 active" : "Max 5 active exceeded"}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
@@ -1697,6 +1861,13 @@ export default function App() {
                                     style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
                                   >
                                     {inf.isActive ? "Pause" : "Activate"}
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenDrawerForInfluencer(inf.username)}
+                                    className="btn btn-secondary"
+                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#a78bfa", borderColor: "rgba(167, 139, 250, 0.3)" }}
+                                  >
+                                    🔍 Status
                                   </button>
                                   <button
                                     onClick={() => handleDeleteInfluencer(inf.username)}
@@ -1810,6 +1981,13 @@ export default function App() {
                                     style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#a78bfa", borderColor: "rgba(167, 139, 250, 0.3)" }}
                                   >
                                     📊 View Session
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenDrawerForInfluencer(inf.username)}
+                                    className="btn btn-secondary"
+                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#a78bfa", borderColor: "rgba(167, 139, 250, 0.3)" }}
+                                  >
+                                    🔍 Status
                                   </button>
                                   <button
                                     onClick={() => handleDeleteInfluencer(inf.username)}
@@ -4089,6 +4267,20 @@ export default function App() {
         </div>
       )}
 
+
+      {drawerSession && (
+        <InfluencerStatusDrawer
+          sessionId={drawerSession.sessionId}
+          influencerUsername={drawerSession.username}
+          niche={drawerSession.niche}
+          onClose={() => {
+            setDrawerSession(null);
+            fetchInfluencers();
+          }}
+          onAddToCrm={handleAddToCrm}
+          crmLeads={crmLeads}
+        />
+      )}
 
     </div>
   );

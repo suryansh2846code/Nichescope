@@ -125,6 +125,16 @@ export async function processLeadQualificationJob(job: {
     { upsert: true, returnDocument: "after" }
   );
 
+  // Update Lead's niche to the AI-qualified category if it differs and is valid
+  if (lead && userIntel.overallCategory && userIntel.overallCategory !== "general") {
+    const originalNiche = lead.niche;
+    if (originalNiche !== userIntel.overallCategory) {
+      lead.niche = userIntel.overallCategory;
+      await lead.save();
+      console.log(`Updated lead @${normalizedUser} niche from "${originalNiche}" to qualified category "${userIntel.overallCategory}"`);
+    }
+  }
+
   if (sessionId) {
     const comment = await CommentAnalysis.findOne({ username: normalizedUser, isLead: true }).sort({ analyzedAt: -1 });
     await discoveryEmitter.emit(sessionId, "lead_created", {

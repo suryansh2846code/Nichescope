@@ -191,6 +191,95 @@ router.post("/influencers/:username/run", async (req, res, next) => {
   }
 });
 
+// POST /discover/niche/:niche/run
+router.post("/niche/:niche/run", async (req, res, next) => {
+  try {
+    const { niche } = req.params;
+    if (!niche) {
+      res.status(400).json({ error: "Niche parameter is required" });
+      return;
+    }
+    const cleanNiche = niche.trim().toLowerCase();
+
+    // 1. Find all active influencers in this niche
+    const activeInfluencers = await SeedInfluencer.find({
+      niche: cleanNiche,
+      isActive: true
+    });
+
+    const count = activeInfluencers.length;
+
+    // 2. Enforce constraint: 1 to 5 active users per process
+    if (count === 0) {
+      res.status(400).json({
+        error: `No active influencers found in niche "${niche}". Please add or activate at least 1 influencer.`
+      });
+      return;
+    }
+
+    if (count > 5) {
+      res.status(400).json({
+        error: `A niche process can run a maximum of 5 influencers. Niche "${niche}" has ${count} active influencers. Please pause/deactivate some to meet this limit.`
+      });
+      return;
+    }
+
+    // 3. Trigger discovery run for each influencer in the niche group
+    const spawnedRuns = [];
+    const timestamp = Date.now();
+
+    for (const influencer of activeInfluencers) {
+      const cleanUsername = influencer.username.toLowerCase().trim();
+
+      // Reset processing state
+      influencer.isProcessed = false;
+      await influencer.save();
+
+      const sessionId = `run-${cleanUsername}-${timestamp}`;
+
+      // Initialize DiscoverySession in database
+      await DiscoverySession.create({
+        sessionId,
+        username: cleanUsername,
+        niche: cleanNiche,
+        status: "running",
+        stats: {
+          postsFound: 0,
+          commentsExtracted: 0,
+          commentsQualified: 0,
+          leadsCreated: 0
+        },
+        events: [],
+        startedAt: new Date()
+      });
+
+      // Add to discovery queue
+      const job = await influencerDiscoveryQueue.add(
+        INFLUENCER_DISCOVER_JOB_NAME,
+        {
+          username: cleanUsername,
+          niche: cleanNiche,
+          sessionId
+        },
+        { jobId: sessionId }
+      );
+
+      spawnedRuns.push({
+        username: cleanUsername,
+        sessionId,
+        jobId: job.id
+      });
+    }
+
+    res.status(202).json({
+      message: `Niche group process started for "${niche}" with ${count} active influencers.`,
+      runs: spawnedRuns
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /discover/sessions/:sessionId/pause
 router.post("/sessions/:sessionId/pause", async (req, res, next) => {
   try {

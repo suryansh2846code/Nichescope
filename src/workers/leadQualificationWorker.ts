@@ -14,7 +14,7 @@ import { Lead } from "../models/Lead";
 import { calculateLeadScore } from "../services/ai/scoring";
 import { getSystemSettings } from "../models/SystemSettings";
 import { CommentAnalysis } from "../models/CommentAnalysis";
-import { discoveryEmitter } from "../services/discovery/discoveryEventEmitter";
+import { discoveryEmitter, checkDiscoverySessionState } from "../services/discovery/discoveryEventEmitter";
 
 setupWorkerLogger("qualification");
 
@@ -32,8 +32,12 @@ export async function processLeadQualificationJob(job: {
   data: LeadQualificationJobData;
   updateProgress: (progress: number) => Promise<any>;
 }) {
-  const provider = getAIProvider();
   const { username, sessionId } = (job.data as any) || {};
+
+  const shouldProceed = await checkDiscoverySessionState(sessionId);
+  if (!shouldProceed) return;
+
+  const provider = getAIProvider();
   const normalizedUser = (username || "").toLowerCase().trim();
   console.log(`Starting Lead Qualification aggregation for @${normalizedUser}`);
   await job.updateProgress(10);

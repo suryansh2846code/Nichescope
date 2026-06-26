@@ -20,7 +20,7 @@ export default function LiveDiscoveryPanel({
   onAddToCrm,
   crmLeads
 }: LiveDiscoveryPanelProps) {
-  const [status, setStatus] = useState<"running" | "completed" | "failed">("running");
+  const [status, setStatus] = useState<"running" | "paused" | "cancelled" | "completed" | "failed">("running");
   const [posts, setPosts] = useState<any[]>([]);
   const [comments, setComments] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
@@ -110,8 +110,14 @@ export default function LiveDiscoveryPanel({
         } else if (type === "lead_created") {
           setLeads(prev => [data, ...prev]);
           setStats(prev => ({ ...prev, leadsCreated: prev.leadsCreated + 1 }));
-        } else if (type === "completed") {
+        } else if (type === "completed" || type === "stage_complete") {
           setStatus("completed");
+        } else if (type === "paused") {
+          setStatus("paused");
+        } else if (type === "resumed") {
+          setStatus("running");
+        } else if (type === "cancelled") {
+          setStatus("cancelled");
         } else if (type === "error" || type === "failed") {
           setStatus("failed");
         }
@@ -147,8 +153,46 @@ export default function LiveDiscoveryPanel({
     return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
   };
 
+  const handlePause = async () => {
+    try {
+      const res = await fetch(`http://localhost:3001/discover/sessions/${sessionId}/pause`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(`Failed to pause: ${data.error || res.statusText}`);
+      }
+    } catch (err) {
+      console.error("Error pausing session:", err);
+    }
+  };
+
+  const handleResume = async () => {
+    try {
+      const res = await fetch(`http://localhost:3001/discover/sessions/${sessionId}/resume`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(`Failed to resume: ${data.error || res.statusText}`);
+      }
+    } catch (err) {
+      console.error("Error resuming session:", err);
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!confirm("Are you sure you want to cancel this discovery run?")) return;
+    try {
+      const res = await fetch(`http://localhost:3001/discover/sessions/${sessionId}/cancel`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(`Failed to cancel: ${data.error || res.statusText}`);
+      }
+    } catch (err) {
+      console.error("Error cancelling session:", err);
+    }
+  };
+
   const getStepStatus = (stepIndex: number) => {
     if (status === "failed") return "❌ Error";
+    if (status === "cancelled") return "❌ Cancelled";
 
     if (stepIndex === 1) {
       // Step 1: Finding posts
@@ -176,8 +220,8 @@ export default function LiveDiscoveryPanel({
     return "⏳ Queued";
   };
 
-  const passRate = stats.commentsAnalyzed > 0 
-    ? Math.round((stats.commentsQualified / stats.commentsAnalyzed) * 100) 
+  const passRate = stats.commentsAnalyzed > 0
+    ? Math.round((stats.commentsQualified / stats.commentsAnalyzed) * 100)
     : 0;
 
   return (
@@ -210,76 +254,117 @@ export default function LiveDiscoveryPanel({
                 background:
                   status === "completed"
                     ? "rgba(34, 197, 94, 0.15)"
-                    : status === "failed"
-                    ? "rgba(239, 68, 68, 0.15)"
-                    : "rgba(0, 186, 255, 0.15)",
+                    : status === "paused"
+                      ? "rgba(234, 179, 8, 0.15)"
+                      : status === "failed" || status === "cancelled"
+                        ? "rgba(239, 68, 68, 0.15)"
+                        : "rgba(0, 186, 255, 0.15)",
                 color:
                   status === "completed"
                     ? "#22c55e"
-                    : status === "failed"
-                    ? "#ef4444"
-                    : "#00baff",
+                    : status === "paused"
+                      ? "#eab308"
+                      : status === "failed" || status === "cancelled"
+                        ? "#ef4444"
+                        : "#00baff",
               }}
             >
               {status.toUpperCase()}
             </span>
           </div>
-          <button
-            onClick={onClose}
-            className="btn btn-secondary"
-            style={{ margin: 0, padding: "0.5rem 1rem" }}
-          >
-            {status === "running" ? "Minimize" : "Close Dashboard"}
-          </button>
-        </div>
-      </div>
-
-      {/* Stepper Status Indicators */}
-      <div className="glass-card" style={{ padding: "1.25rem", marginBottom: "1.5rem" }}>
-        <h3 style={{ margin: "0 0 1rem 0", fontSize: "1.1rem" }}>⚙️ Discovery Pipeline Progress</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem" }}>
-          {[
-            { title: "1. Find Posts", status: getStepStatus(1), color: "#00baff" },
-            { title: "2. Scrape Comments", status: getStepStatus(2), color: "#eab308" },
-            { title: "3. AI Intent Analyzer", status: getStepStatus(3), color: "#a78bfa" },
-            { title: "4. CRM Leads Delivery", status: getStepStatus(4), color: "#22c55e" }
-          ].map((step, idx) => (
-            <div key={idx} style={{ padding: "0.75rem", background: "rgba(0,0,0,0.15)", borderRadius: "8px", borderLeft: `3px solid ${step.color}` }}>
-              <div style={{ fontSize: "0.75rem", color: "var(--color-text-dim)", marginBottom: "0.25rem" }}>{step.title}</div>
-              <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#fff" }}>{step.status}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Global Progress Bar */}
-        {stats.commentsExtracted > 0 && (
-          <div style={{ marginTop: "1.5rem" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "0.4rem" }}>
-              <span>AI Analysis Progress</span>
-              <span>{stats.commentsAnalyzed} / {stats.commentsExtracted} comments ({Math.round((stats.commentsAnalyzed / stats.commentsExtracted) * 100)}%)</span>
-            </div>
-            <div style={{ width: "100%", height: "8px", background: "rgba(255,255,255,0.05)", borderRadius: "4px", overflow: "hidden" }}>
-              <div style={{
-                width: `${(stats.commentsAnalyzed / stats.commentsExtracted) * 100}%`,
-                height: "100%",
-                background: "linear-gradient(90deg, var(--color-accent), #a78bfa)",
-                transition: "width 0.4s ease"
-              }} />
-            </div>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            {status === "running" && (
+              <>
+                <button
+                  onClick={handlePause}
+                  className="btn"
+                  style={{ margin: 0, padding: "0.5rem 1rem", background: "rgba(234, 179, 8, 0.2)", color: "#eab308", border: "1px solid rgba(234, 179, 8, 0.4)", borderRadius: "6px", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.25rem" }}
+                >
+                  ⏸️ Pause
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="btn btn-danger"
+                  style={{ margin: 0, padding: "0.5rem 1rem", background: "rgba(239, 68, 68, 0.2)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.4)", borderRadius: "6px", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.25rem" }}
+                >
+                  ⏹️ Cancel
+                </button>
+              </>
+            )}
+            {status === "paused" && (
+              <>
+                <button
+                  onClick={handleResume}
+                  className="btn"
+                  style={{ margin: 0, padding: "0.5rem 1rem", background: "rgba(34, 197, 94, 0.2)", color: "#22c55e", border: "1px solid rgba(34, 197, 94, 0.4)", borderRadius: "6px", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.25rem" }}
+                >
+                  ▶️ Resume
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="btn btn-danger"
+                  style={{ margin: 0, padding: "0.5rem 1rem", background: "rgba(239, 68, 68, 0.2)", color: "#ef4444", border: "1px solid rgba(239, 68, 68, 0.4)", borderRadius: "6px", cursor: "pointer", display: "flex", alignItems: "center", gap: "0.25rem" }}
+                >
+                  ⏹️ Cancel
+                </button>
+              </>
+            )}
+            <button
+              onClick={onClose}
+              className="btn btn-secondary"
+              style={{ margin: 0, padding: "0.5rem 1rem" }}
+            >
+              {status === "running" || status === "paused" ? "Minimize" : "Close Dashboard"}
+            </button>
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* Grid: Stats and Stream tables */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginBottom: "1.5rem", alignItems: "stretch" }}>
-        <PostsTable posts={posts} />
-        <CommentsStream comments={comments} />
-      </div>
+        {/* Stepper Status Indicators */}
+        <div className="glass-card" style={{ padding: "1.25rem", marginBottom: "1.5rem" }}>
+          <h3 style={{ margin: "0 0 1rem 0", fontSize: "1.1rem" }}>⚙️ Discovery Pipeline Progress</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "1rem" }}>
+            {[
+              { title: "1. Find Posts", status: getStepStatus(1), color: "#00baff" },
+              { title: "2. Scrape Comments", status: getStepStatus(2), color: "#eab308" },
+              { title: "3. AI Intent Analyzer", status: getStepStatus(3), color: "#a78bfa" },
+              { title: "4. CRM Leads Delivery", status: getStepStatus(4), color: "#22c55e" }
+            ].map((step, idx) => (
+              <div key={idx} style={{ padding: "0.75rem", background: "rgba(0,0,0,0.15)", borderRadius: "8px", borderLeft: `3px solid ${step.color}` }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--color-text-dim)", marginBottom: "0.25rem" }}>{step.title}</div>
+                <div style={{ fontSize: "0.9rem", fontWeight: "bold", color: "#fff" }}>{step.status}</div>
+              </div>
+            ))}
+          </div>
 
-      {/* Leads Streaming Section */}
-      <div style={{ marginBottom: "2rem" }}>
-        <LeadsStream leads={leads} onAddToCrm={onAddToCrm} crmLeads={crmLeads} />
+          {/* Global Progress Bar */}
+          {stats.commentsExtracted > 0 && (
+            <div style={{ marginTop: "1.5rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "0.4rem" }}>
+                <span>AI Analysis Progress</span>
+                <span>{stats.commentsAnalyzed} / {stats.commentsExtracted} comments ({Math.round((stats.commentsAnalyzed / stats.commentsExtracted) * 100)}%)</span>
+              </div>
+              <div style={{ width: "100%", height: "8px", background: "rgba(255,255,255,0.05)", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{
+                  width: `${(stats.commentsAnalyzed / stats.commentsExtracted) * 100}%`,
+                  height: "100%",
+                  background: "linear-gradient(90deg, var(--color-accent), #a78bfa)",
+                  transition: "width 0.4s ease"
+                }} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Grid: Stats and Stream tables */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginBottom: "1.5rem", alignItems: "stretch" }}>
+          <PostsTable posts={posts} />
+          <CommentsStream comments={comments} />
+        </div>
+
+        {/* Leads Streaming Section */}
+        <div style={{ marginBottom: "2rem" }}>
+          <LeadsStream leads={leads} onAddToCrm={onAddToCrm} crmLeads={crmLeads} />
+        </div>
       </div>
-    </div>
-  );
+      );
 }

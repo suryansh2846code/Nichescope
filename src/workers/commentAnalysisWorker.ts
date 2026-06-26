@@ -7,7 +7,7 @@ import { Lead } from "../models/Lead";
 import { scrapeQueue, SCRAPE_PROFILE_JOB_NAME } from "../queues/scrapeQueue";
 import { getAIProvider } from "../services/ai/AIProvider";
 import { setupWorkerLogger } from "../utils/logger";
-import { discoveryEmitter } from "../services/discovery/discoveryEventEmitter";
+import { discoveryEmitter, checkDiscoverySessionState } from "../services/discovery/discoveryEventEmitter";
 
 // Setup logging interceptor
 setupWorkerLogger("comment-analysis");
@@ -26,6 +26,10 @@ const worker = new Worker<CommentAnalysisJobData>(
   COMMENT_ANALYSIS_QUEUE_NAME,
   async (job) => {
     const { username, commentText, postUrl, niche, sessionId } = (job.data as any) || {};
+    
+    const shouldProceed = await checkDiscoverySessionState(sessionId);
+    if (!shouldProceed) return;
+
     const normalizedUser = username.toLowerCase().trim();
     console.log(`Starting AI analysis for comment by @${normalizedUser}: "${commentText.slice(0, 50)}..."`);
 

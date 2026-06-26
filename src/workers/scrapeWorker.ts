@@ -13,6 +13,8 @@ import { SeedInfluencer } from "../models/SeedInfluencer";
 import { HashtagDiscovery } from "../models/HashtagDiscovery";
 import { userIntelligenceQueue, AGGREGATE_USER_JOB_NAME } from "../queues/userIntelligenceQueue";
 
+import { checkDiscoverySessionState } from "../services/discovery/discoveryEventEmitter";
+
 async function handleScrapeCompletionOrSkip(
   username: string,
   niche: string,
@@ -70,6 +72,10 @@ const worker = new Worker<ScrapeJobData>(
   SCRAPE_QUEUE_NAME,
   async (job) => {
     const { username: rawUsername, niche, sessionId } = (job.data as any) || {};
+    
+    const shouldProceed = await checkDiscoverySessionState(sessionId);
+    if (!shouldProceed) return;
+
     const username = (rawUsername || "").replace(/^@/, "").trim();
     console.log(`Starting scrape job ${job.id} for @${username}`);
     

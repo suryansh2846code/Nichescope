@@ -1944,6 +1944,30 @@ export default function App() {
                                     🔄 Run Again
                                   </button>
                                   <button
+                                    onClick={async () => {
+                                      try {
+                                        const res = await fetch(`${API_BASE_URL}/discover/influencers/${inf.username}/latest-session`);
+                                        if (res.ok) {
+                                          const data = await res.json();
+                                          setActiveSession({
+                                            sessionId: data.sessionId,
+                                            username: data.username,
+                                            niche: data.niche
+                                          });
+                                        } else {
+                                          alert("No session history found for this influencer");
+                                        }
+                                      } catch (err) {
+                                        console.error("Error fetching latest session:", err);
+                                        alert("Failed to load session history");
+                                      }
+                                    }}
+                                    className="btn btn-secondary"
+                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#a78bfa", borderColor: "rgba(167, 139, 250, 0.3)" }}
+                                  >
+                                    📊 View Session
+                                  </button>
+                                  <button
                                     onClick={() => handleDeleteInfluencer(inf.username)}
                                     className="btn btn-secondary"
                                     style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#ff4566", borderColor: "rgba(255,69,102,0.3)" }}

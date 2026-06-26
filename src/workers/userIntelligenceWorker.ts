@@ -15,6 +15,8 @@ import { Lead } from "../models/Lead";
 import { analyzeFollowingList } from "../services/following/followingAnalysisService";
 import { CommentAnalysis } from "../models/CommentAnalysis";
 
+import { checkDiscoverySessionState } from "../services/discovery/discoveryEventEmitter";
+
 setupWorkerLogger("intelligence");
 
 
@@ -34,8 +36,12 @@ export async function processUserIntelligenceJob(job: {
   data: UserIntelligenceJobData;
   updateProgress: (progress: number) => Promise<any>;
 }) {
-  const provider = getAIProvider();
   const { username, sessionId } = (job.data as any) || {};
+  
+  const shouldProceed = await checkDiscoverySessionState(sessionId);
+  if (!shouldProceed) return;
+
+  const provider = getAIProvider();
   const normalizedUser = (username || "").toLowerCase().trim();
   console.log(`Starting User Intelligence aggregation for @${normalizedUser}`);
   await job.updateProgress(10);

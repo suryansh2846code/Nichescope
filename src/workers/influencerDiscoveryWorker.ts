@@ -10,7 +10,7 @@ import {
 import { SeedInfluencer } from "../models/SeedInfluencer";
 import { launchStealth, safeClose, collectRecentPostUrls } from "../scraper/instagram";
 import { setupWorkerLogger } from "../utils/logger";
-import { discoveryEmitter } from "../services/discovery/discoveryEventEmitter";
+import { discoveryEmitter, checkDiscoverySessionState } from "../services/discovery/discoveryEventEmitter";
 
 // Setup logging interceptor
 setupWorkerLogger("influencer-discovery");
@@ -31,6 +31,10 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
     console.log(`Starting influencer discovery job ${job.id}`);
     
     const { username, niche: jobNiche, testScenario, sessionId } = (job.data as any) || {};
+    
+    const shouldProceed = await checkDiscoverySessionState(sessionId);
+    if (!shouldProceed) return;
+
     const POSTS_PER_RUN = 5;
     
     const scanInfluencer = async (cleanInfluencer: string, niche: string) => {

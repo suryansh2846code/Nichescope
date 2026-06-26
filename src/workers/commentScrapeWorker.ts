@@ -10,7 +10,7 @@ import {
 import { scrapeComments } from "../scraper/instagram";
 import { setupWorkerLogger } from "../utils/logger";
 import { getSystemSettings } from "../models/SystemSettings";
-import { discoveryEmitter } from "../services/discovery/discoveryEventEmitter";
+import { discoveryEmitter, checkDiscoverySessionState } from "../services/discovery/discoveryEventEmitter";
 
 // Setup logging interceptor
 setupWorkerLogger("comment-scraper");
@@ -29,6 +29,10 @@ const worker = new Worker<CommentScrapeJobData>(
   COMMENT_SCRAPE_QUEUE_NAME,
   async (job) => {
     const { postUrl, niche, sessionId } = (job.data as any) || {};
+    
+    const shouldProceed = await checkDiscoverySessionState(sessionId);
+    if (!shouldProceed) return;
+
     console.log(`Starting comment scrape job ${job.id} for post: ${postUrl}`);
 
     const match = postUrl.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);

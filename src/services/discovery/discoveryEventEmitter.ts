@@ -59,6 +59,12 @@ class DiscoveryEventEmitter {
         updateQuery.$set = { status: "completed", completedAt: timestamp };
       } else if (type === "error" || type === "failed") {
         updateQuery.$set = { status: "failed", completedAt: timestamp };
+      } else if (type === "paused") {
+        updateQuery.$set = { status: "paused" };
+      } else if (type === "resumed") {
+        updateQuery.$set = { status: "running" };
+      } else if (type === "cancelled") {
+        updateQuery.$set = { status: "cancelled", completedAt: timestamp };
       }
 
       // Upsert and retrieve updated session doc
@@ -106,6 +112,34 @@ class DiscoveryEventEmitter {
 
   async close() {
     await this.publisher.quit();
+  }
+}
+
+export async function checkDiscoverySessionState(sessionId: string | undefined): Promise<boolean> {
+  if (!sessionId) return true;
+
+  while (true) {
+    const session = await DiscoverySession.findOne({ sessionId });
+    if (!session) {
+      return true; // Proceed if session is not yet registered
+    }
+
+    if (
+      session.status === "failed" ||
+      session.status === "completed" ||
+      session.status === "cancelled"
+    ) {
+      console.log(`[DiscoveryControl] Session ${sessionId} is terminated with status "${session.status}". Discarding current job.`);
+      return false; // Stop processing
+    }
+
+    if (session.status === "paused") {
+      console.log(`[DiscoveryControl] Session ${sessionId} is paused. Waiting...`);
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      continue;
+    }
+
+    return true; // Session is running, proceed
   }
 }
 

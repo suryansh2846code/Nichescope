@@ -191,6 +191,94 @@ router.post("/influencers/:username/run", async (req, res, next) => {
   }
 });
 
+// POST /discover/sessions/:sessionId/pause
+router.post("/sessions/:sessionId/pause", async (req, res, next) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await DiscoverySession.findOne({ sessionId });
+    if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+
+    if (session.status !== "running") {
+      res.status(400).json({ error: `Cannot pause session in state: ${session.status}` });
+      return;
+    }
+
+    const { discoveryEmitter } = await import("../services/discovery/discoveryEventEmitter");
+    await discoveryEmitter.emit(sessionId, "paused", { message: "Session paused" });
+
+    res.json({ message: "Session paused successfully" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /discover/sessions/:sessionId/resume
+router.post("/sessions/:sessionId/resume", async (req, res, next) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await DiscoverySession.findOne({ sessionId });
+    if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+
+    if (session.status !== "paused") {
+      res.status(400).json({ error: `Cannot resume session in state: ${session.status}` });
+      return;
+    }
+
+    const { discoveryEmitter } = await import("../services/discovery/discoveryEventEmitter");
+    await discoveryEmitter.emit(sessionId, "resumed", { message: "Session resumed" });
+
+    res.json({ message: "Session resumed successfully" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /discover/sessions/:sessionId/cancel
+router.post("/sessions/:sessionId/cancel", async (req, res, next) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await DiscoverySession.findOne({ sessionId });
+    if (!session) {
+      res.status(404).json({ error: "Session not found" });
+      return;
+    }
+
+    if (session.status === "completed" || session.status === "failed" || session.status === "cancelled") {
+      res.status(400).json({ error: `Cannot cancel session in state: ${session.status}` });
+      return;
+    }
+
+    const { discoveryEmitter } = await import("../services/discovery/discoveryEventEmitter");
+    await discoveryEmitter.emit(sessionId, "cancelled", { message: "Session cancelled by user" });
+
+    res.json({ message: "Session cancelled successfully" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /discover/influencers/:username/latest-session
+router.get("/influencers/:username/latest-session", async (req, res, next) => {
+  try {
+    const { username } = req.params;
+    const cleanUsername = username.replace(/^@/, "").trim().toLowerCase();
+    const session = await DiscoverySession.findOne({ username: cleanUsername }).sort({ startedAt: -1 });
+    if (!session) {
+      res.status(404).json({ error: "No discovery session found for this influencer" });
+      return;
+    }
+    res.json(session);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /discover/influencers/:username/leads
 router.get("/influencers/:username/leads", async (req, res, next) => {
   try {

@@ -52,6 +52,121 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+// GET /leads/search
+router.get("/search", async (req, res, next) => {
+  try {
+    const { niche, urgency, minScore, hasEmail } = req.query;
+
+    const pipeline: any[] = [];
+
+    // Join with Lead collection to get profile details
+    pipeline.push({
+      $lookup: {
+        from: "leads",
+        localField: "username",
+        foreignField: "username",
+        as: "profile",
+      },
+    });
+
+    // Unwind the profile array
+    pipeline.push({
+      $unwind: {
+        path: "$profile",
+        preserveNullAndEmptyArrays: true,
+      },
+    });
+
+    // Match filters
+    const matchFilters: Record<string, any> = {};
+
+    if (typeof niche === "string" && niche.trim() !== "") {
+      const cleanNiche = niche.trim();
+      matchFilters.$or = [
+        { category: new RegExp(cleanNiche, "i") },
+        { serviceNeeded: new RegExp(cleanNiche, "i") },
+        { "profile.niche": new RegExp(cleanNiche, "i") },
+      ];
+    }
+
+    if (typeof urgency === "string" && urgency.trim() !== "") {
+      matchFilters.urgency = urgency.trim();
+    }
+
+    if (typeof minScore === "string" && minScore.trim() !== "") {
+      const score = Number(minScore);
+      if (!isNaN(score)) {
+        matchFilters.leadScore = { $gte: score };
+      }
+    }
+
+    if (hasEmail === "true") {
+      matchFilters["profile.contactEmail"] = { $exists: true, $ne: "" };
+    }
+
+    if (Object.keys(matchFilters).length > 0) {
+      pipeline.push({ $match: matchFilters });
+    }
+
+    // Sort by leadScore desc, qualifiedAt desc
+    pipeline.push({
+      $sort: { leadScore: -1, qualifiedAt: -1 },
+    });
+
+    const results = await LeadQualification.aggregate(pipeline);
+
+    // Format output
+    const formattedResults = results.map((r) => ({
+      username: r.username,
+      leadScore: r.leadScore,
+      problem: r.problem,
+      serviceNeeded: r.serviceNeeded,
+      urgency: r.urgency,
+      buyingIntent: r.buyingIntent,
+      confidence: r.confidence,
+      qualificationReason: r.qualificationReason,
+      recommendedAction: r.recommendedAction,
+      supportingPosts: r.supportingPosts,
+      category: r.category,
+      intent: r.intent,
+      qualifiedAt: r.qualifiedAt,
+      // Joined Lead Profile
+      fullName: r.profile?.fullName || "",
+      bio: r.profile?.bio || "",
+      followerCount: r.profile?.followerCount || 0,
+      followingCount: r.profile?.followingCount || 0,
+      profileUrl: r.profile?.profileUrl || `https://www.instagram.com/${r.username}/`,
+      contactEmail: r.profile?.contactEmail || "",
+      followingBoost: r.profile?.followingBoost || 0,
+      followingOverlapCount: r.profile?.followingOverlapCount || 0,
+      matchedSeedInfluencers: r.profile?.matchedSeedInfluencers || [],
+    }));
+
+    // Calculate dynamic stats
+    const totalLeads = formattedResults.length;
+    const avgScore =
+      totalLeads > 0
+        ? Math.round(formattedResults.reduce((acc, curr) => acc + curr.leadScore, 0) / totalLeads)
+        : 0;
+
+    // Get unique seed influencers count
+    const uniqueSeeds = new Set(
+      formattedResults.flatMap((r) => r.matchedSeedInfluencers || [])
+    );
+
+    res.json({
+      leads: formattedResults,
+      stats: {
+        totalLeads,
+        avgScore,
+        seedInfluencersCount: uniqueSeeds.size,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /leads/export
 router.get("/export", async (req, res, next) => {
   try {

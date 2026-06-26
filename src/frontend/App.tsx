@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import LiveDiscoveryPanel from "./components/LiveDiscoveryPanel";
+import NicheLeadSearch from "./components/NicheLeadSearch";
 
 const API_BASE_URL = "http://localhost:3001";
 
@@ -1189,7 +1190,7 @@ export default function App() {
           className={`tab-btn ${activeTab === "discovery" ? "active" : ""}`}
           onClick={() => setActiveTab("discovery")}
         >
-          🔍 Semantic Search
+          🔍 Niche Lead Search
         </button>
         {/* <button
           className={`tab-btn ${activeTab === "hashtag-discovery" ? "active" : ""}`}
@@ -1239,169 +1240,12 @@ export default function App() {
       </div>
 
       {activeTab === "discovery" && (
-        <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
-          {/* Page Help / Description Panel */}
-          <div className="glass-card page-description-banner" style={{ marginBottom: "1.5rem" }}>
-            <h3>🔍 Semantic Lead Discovery</h3>
-            <p>
-              Search across the scraped universe using natural language semantic queries, or input hashtags to initiate automated discovery pipelines.
-            </p>
-          </div>
-
-          {/* Top Search bar card */}
-          <div className="glass-card" style={{ padding: "2rem", marginBottom: "2rem", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-
-            <form onSubmit={handleSearchSubmit} style={{ display: "flex", gap: "1rem" }}>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Describe your ideal lead (e.g. 'people looking for dermatologists' or 'skincare routine advice')..."
-                className="input-field"
-                style={{
-                  flex: 1,
-                  background: "rgba(255, 255, 255, 0.03)",
-                  border: "var(--glass-border)",
-                  borderRadius: "8px",
-                  color: "#fff",
-                  padding: "1rem",
-                  fontSize: "1rem",
-                  outline: "none"
-                }}
-              />
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ padding: "0 2rem", display: "flex", alignItems: "center", gap: "0.5rem" }}
-                disabled={searchLoading}
-              >
-                {searchLoading ? <div className="spinner" style={{ width: "16px", height: "16px", borderWidth: "2px" }}></div> : "Search"}
-              </button>
-            </form>
-
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.75rem" }}>
-              <span style={{ fontSize: "0.85rem", color: "var(--color-text-dim)", fontWeight: "bold" }}>Try queries:</span>
-              <button
-                onClick={() => {
-                  setSearchQuery("Show me people who need help with dry skin");
-                  fetchSearchResults("Show me people who need help with dry skin");
-                }}
-                className="btn btn-secondary"
-                style={{ padding: "0.4rem 0.8rem", fontSize: "0.8rem", borderRadius: "9999px", minWidth: "auto", margin: 0 }}
-              >
-                ✨ Help with dry skin
-              </button>
-              <button
-                onClick={() => {
-                  setSearchQuery("Find fitness advice seekers");
-                  fetchSearchResults("Find fitness advice seekers");
-                }}
-                className="btn btn-secondary"
-                style={{ padding: "0.4rem 0.8rem", fontSize: "0.8rem", borderRadius: "9999px", minWidth: "auto", margin: 0 }}
-              >
-                ✨ Fitness advice
-              </button>
-              <button
-                onClick={() => {
-                  setSearchQuery("Need software development");
-                  fetchSearchResults("Need software development");
-                }}
-                className="btn btn-secondary"
-                style={{ padding: "0.4rem 0.8rem", fontSize: "0.8rem", borderRadius: "9999px", minWidth: "auto", margin: 0 }}
-              >
-                ✨ Software development
-              </button>
-              <button
-                onClick={() => {
-                  setSearchQuery("Looking for a chiropractor");
-                  fetchSearchResults("Looking for a chiropractor");
-                }}
-                className="btn btn-secondary"
-                style={{ padding: "0.4rem 0.8rem", fontSize: "0.8rem", borderRadius: "9999px", minWidth: "auto", margin: 0 }}
-              >
-                ✨ Chiropractor search
-              </button>
-            </div>
-          </div>
-
-          <div className="glass-card card-table animate-fade-in" style={{ minHeight: "300px" }}>
-            <h2 className="card-title">Results Matching query: {searchQuery || "All"}</h2>
-            {searchLoading && (
-              <div style={{ textAlign: "center", padding: "3rem" }}>
-                <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
-                <p style={{ color: "var(--color-text-dim)" }}>Matching vector embeddings...</p>
-              </div>
-            )}
-            {searchError && <div className="toast toast-error">{searchError}</div>}
-            {!searchLoading && !searchError && searchResults.length === 0 && (
-              <div className="empty-state" style={{ padding: "4rem 0" }}>
-                <div className="empty-state-icon">📭</div>
-                <h3>No Results Found</h3>
-                <p>Submit a query in the search bar above to query vector space.</p>
-              </div>
-            )}
-            {!searchLoading && !searchError && searchResults.length > 0 && (
-              <div className="table-responsive">
-                <table className="leads-table">
-                  <thead>
-                    <tr>
-                      <th>Username</th>
-                      <th>Problem Area</th>
-                      <th>Service Needed</th>
-                      <th>Rec. Action</th>
-                      <th>Buying Intent</th>
-                      <th>Similarity Score</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {searchResults.map((result, idx) => {
-                      const inCrm = crmLeads.some(cl => cl.username.toLowerCase() === result.username.toLowerCase());
-                      return (
-                        <tr key={idx} className="lead-row">
-                          <td>
-                            <a href={`https://instagram.com/${result.username}`} target="_blank" rel="noopener noreferrer" style={{ fontWeight: "bold" }}>
-                              @{result.username}
-                            </a>
-                          </td>
-                          <td>{result.problem}</td>
-                          <td>{result.serviceNeeded}</td>
-                          <td>
-                            <span style={{
-                              color: result.recommendedAction === "Contact immediately" ? "#ff4566" : "var(--color-accent)",
-                              fontWeight: "bold"
-                            }}>
-                              {result.recommendedAction}
-                            </span>
-                          </td>
-                          <td>
-                            <span style={{ fontWeight: "bold" }}>{result.buyingIntent}%</span>
-                          </td>
-                          <td>
-                            {(result.similarityScore * 100).toFixed(1)}%
-                          </td>
-                          <td>
-                            {inCrm ? (
-                              <span style={{ color: "var(--color-success)", fontWeight: "bold", fontSize: "0.85rem" }}>✅ In CRM</span>
-                            ) : (
-                              <button
-                                onClick={() => handleAddToCrm(result.username)}
-                                className="btn btn-primary"
-                                style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
-                              >
-                                Add to CRM
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
+        <NicheLeadSearch
+          onAddToCrm={handleAddToCrm}
+          onViewDetails={fetchInboxLeadDetails}
+          onStartScan={() => setActiveTab("seed-influencers")}
+          crmLeads={crmLeads}
+        />
       )}
 
       {/*

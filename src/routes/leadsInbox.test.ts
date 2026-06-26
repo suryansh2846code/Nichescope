@@ -88,7 +88,7 @@ describe("Leads Inbox API Endpoints", () => {
     });
   });
 
-  const runRouteHandler = async (routeIndex: number, method: "GET" | "POST", reqQuery: any = {}, reqParams: any = {}) => {
+  const runRouteHandler = async (routePath: string, method: "GET" | "POST", reqQuery: any = {}, reqParams: any = {}) => {
     let resData: any = null;
     let resStatus = 200;
     let writtenData = "";
@@ -118,7 +118,19 @@ describe("Leads Inbox API Endpoints", () => {
       end: () => {}
     } as any;
 
-    const routeHandler = leadsRouter.stack[routeIndex]!.route!.stack[0]!.handle;
+    const methodLower = method.toLowerCase();
+    const routeLayer = leadsRouter.stack.find(
+      (layer: any) =>
+        layer.route &&
+        layer.route.path === routePath &&
+        layer.route.methods[methodLower]
+    );
+
+    if (!routeLayer) {
+      throw new Error(`Route handler not found for path: ${routePath}, method: ${method}`);
+    }
+
+    const routeHandler = routeLayer.route!.stack[0]!.handle;
 
     await routeHandler(mockReq, mockRes, (err: any) => {
       if (err) throw err;
@@ -128,8 +140,7 @@ describe("Leads Inbox API Endpoints", () => {
   };
 
   test("GET /leads/inbox supports filtering by urgency, service, buyingIntent, category", async () => {
-    // Route index 3: GET /inbox
-    const { status, data } = await runRouteHandler(3, "GET", {
+    const { status, data } = await runRouteHandler("/inbox", "GET", {
       urgency: "high",
       category: "healthcare",
       buyingIntent: "90",
@@ -145,8 +156,7 @@ describe("Leads Inbox API Endpoints", () => {
   });
 
   test("GET /leads/inbox filters out non-matching records", async () => {
-    // Route index 3: GET /inbox
-    const { status, data } = await runRouteHandler(3, "GET", {
+    const { status, data } = await runRouteHandler("/inbox", "GET", {
       urgency: "low"
     });
 
@@ -155,8 +165,7 @@ describe("Leads Inbox API Endpoints", () => {
   });
 
   test("GET /leads/inbox/:username retrieves full detail profile", async () => {
-    // Route index 4: GET /inbox/:username
-    const { status, data } = await runRouteHandler(4, "GET", {}, { username: testUser });
+    const { status, data } = await runRouteHandler("/inbox/:username", "GET", {}, { username: testUser });
 
     expect(status).toBe(200);
     expect(data.qualification).toBeDefined();
@@ -169,8 +178,7 @@ describe("Leads Inbox API Endpoints", () => {
   });
 
   test("GET /leads/export supports JSON format", async () => {
-    // Route index 2: GET /export
-    const { status, data } = await runRouteHandler(2, "GET", { format: "json" });
+    const { status, data } = await runRouteHandler("/export", "GET", { format: "json" });
 
     expect(status).toBe(200);
     expect(data.length).toBe(1);
@@ -179,11 +187,42 @@ describe("Leads Inbox API Endpoints", () => {
   });
 
   test("GET /leads/export supports CSV format", async () => {
-    // Route index 2: GET /export
-    const { status, writtenData, headers } = await runRouteHandler(2, "GET", { format: "csv" });
+    const { status, writtenData, headers } = await runRouteHandler("/export", "GET", { format: "csv" });
 
     expect(headers["Content-Type"]).toBe("text/csv");
     expect(writtenData).toContain("username,serviceNeeded,urgency,buyingIntent,leadScore,qualificationReason");
     expect(writtenData).toContain(`${testUser},Dermatologist,high,92,95,Highly urgent skincare query`);
+  });
+
+  test("GET /leads/search returns qualified leads and niche insights", async () => {
+    const { Lead } = await import("../models/Lead");
+    await Lead.deleteMany({});
+    await Lead.create({
+      username: testUser,
+      fullName: "Test Inbox User",
+      profileUrl: `https://instagram.com/${testUser}`,
+      foundVia: "instagram-scraper",
+      niche: "healthcare",
+      scrapedAt: new Date(),
+      followerCount: 5000,
+      contactEmail: "test@inbox.com",
+      matchedSeedInfluencers: ["skincare_doc"]
+    });
+
+    const { status, data } = await runRouteHandler("/search", "GET", {
+      niche: "healthcare",
+      urgency: "high"
+    });
+
+    expect(status).toBe(200);
+    expect(data.leads.length).toBe(1);
+    expect(data.leads[0].username).toBe(testUser);
+    expect(data.leads[0].fullName).toBe("Test Inbox User");
+    expect(data.leads[0].contactEmail).toBe("test@inbox.com");
+    expect(data.leads[0].leadScore).toBe(95);
+
+    expect(data.stats.totalLeads).toBe(1);
+    expect(data.stats.avgScore).toBe(95);
+    expect(data.stats.seedInfluencersCount).toBe(1);
   });
 });

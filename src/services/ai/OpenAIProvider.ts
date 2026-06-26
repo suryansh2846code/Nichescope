@@ -78,6 +78,7 @@ Return a STRICT JSON response in this exact format, with no markdown wrappers:
           ],
           response_format: { type: "json_object" },
           temperature: 0.1,
+          max_tokens: 400,
         }),
       });
 
@@ -232,6 +233,7 @@ ${captions.map((c, i) => `${i + 1}. ${c}`).join("\n")}`;
           ],
           response_format: { type: "json_object" },
           temperature: 0.1,
+          max_tokens: 400,
         }),
       });
 

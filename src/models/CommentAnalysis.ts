@@ -8,6 +8,8 @@ export interface CommentAnalysisAttrs {
   isLead: boolean;
   niche: string;
   analyzedAt: Date;
+  category?: string;
+  intent?: string;
 }
 
 const commentAnalysisSchema = new Schema(
@@ -43,6 +45,14 @@ const commentAnalysisSchema = new Schema(
       required: true,
       trim: true,
       index: true,
+    },
+    category: {
+      type: String,
+      trim: true,
+    },
+    intent: {
+      type: String,
+      trim: true,
     },
     analyzedAt: {
       type: Date,

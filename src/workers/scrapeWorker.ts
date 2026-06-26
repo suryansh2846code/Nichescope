@@ -11,6 +11,46 @@ import { Lead } from "../models/Lead";
 import { getSystemSettings } from "../models/SystemSettings";
 import { SeedInfluencer } from "../models/SeedInfluencer";
 import { HashtagDiscovery } from "../models/HashtagDiscovery";
+import { userIntelligenceQueue, AGGREGATE_USER_JOB_NAME } from "../queues/userIntelligenceQueue";
+
+async function handleScrapeCompletionOrSkip(
+  username: string,
+  niche: string,
+  hasProfileData: boolean,
+  triggerUserIntel: boolean
+) {
+  const cleanUser = username.toLowerCase().trim();
+
+  if (!hasProfileData) {
+    const existingLead = await Lead.findOne({ username: new RegExp(`^${cleanUser}$`, "i") });
+    if (!existingLead) {
+      await Lead.create({
+        username: cleanUser,
+        fullName: "",
+        bio: "",
+        profileUrl: `https://www.instagram.com/${cleanUser}/`,
+        niche: niche,
+        foundVia: "instagram-scraper",
+        scrapedAt: new Date(),
+        rawData: {},
+      });
+      console.log(`Created placeholder lead for @${cleanUser} (skipped/failed scrape)`);
+    }
+  }
+
+  if (triggerUserIntel) {
+    try {
+      await userIntelligenceQueue.add(
+        AGGREGATE_USER_JOB_NAME,
+        { username: cleanUser },
+        { jobId: cleanUser }
+      );
+      console.log(`Enqueued UserIntelligence aggregation for @${cleanUser}`);
+    } catch (err) {
+      console.error(`Failed to enqueue user intelligence job for @${cleanUser}:`, err);
+    }
+  }
+}
 
 // Setup logging interceptor
 setupWorkerLogger("scraper");
@@ -110,6 +150,8 @@ const worker = new Worker<ScrapeJobData>(
       console.log("STEP 6: Saving posts");
       await saveOrUpdatePosts(username, posts);
 
+      await handleScrapeCompletionOrSkip(username, job.data.niche, true, posts.length === 0);
+
       currentStage = "Completed";
       await job.updateProgress({ percent: 100, stage: currentStage });
 
@@ -125,6 +167,8 @@ const worker = new Worker<ScrapeJobData>(
         maxFollowers: job.data.maxFollowers,
       };
     } catch (error: any) {
+      await handleScrapeCompletionOrSkip(username, job.data.niche, false, true);
+
       if (error.message === "TIMEOUT") {
         console.log(`Profile timeout reached for @${username}`);
         console.log(`Skipping profile`);

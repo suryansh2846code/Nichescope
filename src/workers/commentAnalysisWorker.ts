@@ -45,6 +45,8 @@ const worker = new Worker<CommentAnalysisJobData>(
           intentScore: result.confidence,
           isLead: result.isLead,
           niche,
+          category: result.category,
+          intent: result.intent,
           analyzedAt: new Date(),
         },
         { upsert: true, returnDocument: "after" }

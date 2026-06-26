@@ -13,6 +13,7 @@ import { leadQualificationQueue, QUALIFY_LEAD_JOB_NAME } from "../queues/leadQua
 import { setupWorkerLogger } from "../utils/logger";
 import { Lead } from "../models/Lead";
 import { analyzeFollowingList } from "../services/following/followingAnalysisService";
+import { CommentAnalysis } from "../models/CommentAnalysis";
 
 setupWorkerLogger("intelligence");
 
@@ -41,8 +42,12 @@ export async function processUserIntelligenceJob(job: {
 
   // 1. Load all PostAnalysis records for user
   const analyses = await PostAnalysis.find({ username: normalizedUser });
-  if (analyses.length === 0) {
-    console.log(`No post analyses found for @${normalizedUser}. Skipping user aggregation.`);
+  
+  // Also load all CommentAnalysis records for this user
+  const commentAnalyses = await CommentAnalysis.find({ username: normalizedUser, isLead: true });
+
+  if (analyses.length === 0 && commentAnalyses.length === 0) {
+    console.log(`No post or comment analyses found for @${normalizedUser}. Skipping user aggregation.`);
     await job.updateProgress(100);
     return { username: normalizedUser, status: "skipped", reason: "no_analyses" };
   }
@@ -76,6 +81,17 @@ export async function processUserIntelligenceJob(job: {
     }
   }
 
+  for (const comment of commentAnalyses) {
+    const cat = comment.category || comment.niche || "general";
+    categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+
+    const intent = comment.intent || "seeking_recommendation";
+    intentCounts[intent] = (intentCounts[intent] || 0) + 1;
+
+    totalConfidence += comment.intentScore || 0;
+    totalPostLeadScore += comment.intentScore || 0;
+  }
+
   // Determine dominant overallCategory and overallIntent
   const categoriesList = Object.entries(categoryCounts).map(([category, count]) => ({
     category,
@@ -91,8 +107,9 @@ export async function processUserIntelligenceJob(job: {
   intentsList.sort((a, b) => b.count - a.count || a.intent.localeCompare(b.intent));
   const overallIntent = intentsList[0]?.intent || "other";
 
-  const averageConfidence = totalConfidence / analyses.length;
-  const averagePostLeadScore = totalPostLeadScore / analyses.length;
+  const totalItems = analyses.length + commentAnalyses.length;
+  const averageConfidence = totalConfidence / totalItems;
+  const averagePostLeadScore = totalPostLeadScore / totalItems;
 
   await job.updateProgress(50);
 
@@ -156,6 +173,13 @@ export async function processUserIntelligenceJob(job: {
     }
   }
 
+  // Also extract lead comment text for context in AI summary
+  for (const comment of commentAnalyses.slice(0, 5)) {
+    if (comment.commentText.trim()) {
+      summaryInputs.push(`Lead Comment: "${comment.commentText.slice(0, 300).trim()}"`);
+    }
+  }
+
   // Call AI provider
   const summary = await provider.generateUserSummary(summaryInputs);
   await job.updateProgress(80);
@@ -164,11 +188,14 @@ export async function processUserIntelligenceJob(job: {
   let firstSeenAt: Date | undefined;
   let lastSeenAt: Date | undefined;
 
-  const dates = analyses
-    .map((a) => {
-      const post = postsMap.get(a.postId);
-      return post?.postedAt || a.analyzedAt || (a as any).createdAt;
-    })
+  const dates = [
+    ...analyses
+      .map((a) => {
+        const post = postsMap.get(a.postId);
+        return post?.postedAt || a.analyzedAt || (a as any).createdAt;
+      }),
+    ...commentAnalyses.map((c) => c.analyzedAt || (c as any).createdAt)
+  ]
     .filter(Boolean)
     .map((d) => new Date(d));
 

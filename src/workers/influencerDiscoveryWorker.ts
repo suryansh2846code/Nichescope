@@ -29,14 +29,14 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
   INFLUENCER_DISCOVERY_QUEUE_NAME,
   async (job) => {
     console.log(`Starting influencer discovery job ${job.id}`);
-    
+
     const { username, niche: jobNiche, testScenario, sessionId } = (job.data as any) || {};
-    
+
     const shouldProceed = await checkDiscoverySessionState(sessionId);
     if (!shouldProceed) return;
 
     const POSTS_PER_RUN = 5;
-    
+
     const scanInfluencer = async (cleanInfluencer: string, niche: string) => {
       if (testScenario === "influencer-private") {
         console.log(`Influencer @${cleanInfluencer} has private account (mock) — skipping`);
@@ -79,16 +79,16 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
         // Launch stealth browser, visit influencer profile
         const { browser, page, context } = await launchStealth();
         const profileUrl = `https://www.instagram.com/${cleanInfluencer}/`;
-        
+
         try {
           await page.goto(profileUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-          
+
           // Check if profile is private/doesn't exist
           const isPrivate = await page.evaluate(() => {
             const text = document.body.innerText;
             return text.includes("private") || text.includes("This account is private");
           });
-          
+
           if (isPrivate) {
             console.log(`Influencer @${cleanInfluencer} has private account — skipping`);
             return {
@@ -100,11 +100,11 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
               reason: "private_account"
             };
           }
-          
+
           // Collect recent post URLs (reusing the helper)
           discoveredPostUrls = await collectRecentPostUrls(page, POSTS_PER_RUN);
           console.log(`Discovered ${discoveredPostUrls.length} post URLs for @${cleanInfluencer}`);
-          
+
           return {
             influencerUsername: cleanInfluencer,
             niche,
@@ -131,99 +131,165 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
       // Single influencer scan requested (usually via manual run or custom job)
       const cleanInfluencer = username.replace(/^@/, "").trim().toLowerCase();
       const niche = jobNiche || "general";
-      const result = await scanInfluencer(cleanInfluencer, niche);
-      
-      if (result.status === "skipped") {
-        await SeedInfluencer.updateOne(
-          { username: cleanInfluencer },
-          { $set: { isProcessed: true, isActive: false, processedAt: new Date(), updatedAt: new Date() } }
-        );
-        if (sessionId) {
-          await discoveryEmitter.emit(sessionId, "error", {
-            reason: result.reason || "private_account",
-            message: `Influencer @${cleanInfluencer} is private or skipped.`
-          });
-        }
-        return result;
-      }
-      
-      const urls = result.discoveredPostUrls || [];
-      const getPostId = (url: string) => {
-        const match = url.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
-        return (match && match[1]) || url;
-      };
 
-      if (urls.length > 0) {
-        const latestPostId = getPostId(urls[0]!);
-        
-        await SeedInfluencer.updateOne(
-          { username: cleanInfluencer },
-          { 
-            $set: { 
-              lastProcessedPostId: latestPostId, 
-              isProcessed: true, 
-              isActive: false, 
-              processedAt: new Date(),
-              updatedAt: new Date() 
-            } 
-          }
-        );
+      try {
+        const result = await scanInfluencer(cleanInfluencer, niche);
 
-        if (sessionId) {
-          const postsPayload = urls.map((url, idx) => ({
-            postId: getPostId(url),
-            url,
-            caption: `Post #${idx + 1}`,
-            comments_estimated: 10,
-            mediaType: "image"
-          }));
-          await discoveryEmitter.emit(sessionId, "posts_found", { posts: postsPayload });
-        }
-
-        for (const postUrl of urls) {
-          const postId = getPostId(postUrl);
-          const jobId = `comments-${postId}`;
-          console.log(`Enqueuing comment scrape for post ${postId} (${postUrl})`);
-
-          await commentScrapeQueue.add(
-            COMMENT_SCRAPE_JOB_NAME,
-            {
-              postUrl,
-              niche,
-              sessionId // Propagate session
-            },
-            { jobId } // Deduplicates at BullMQ queue level
+        if (result.status === "skipped") {
+          await SeedInfluencer.updateOne(
+            { username: cleanInfluencer },
+            { $set: { isProcessed: true, isActive: false, processedAt: new Date(), updatedAt: new Date() } }
           );
-          totalEnqueued++;
-        }
-      } else {
-        // No posts found but still processed
-        await SeedInfluencer.updateOne(
-          { username: cleanInfluencer },
-          { 
-            $set: { 
-              isProcessed: true, 
-              isActive: false, 
-              processedAt: new Date(),
-              updatedAt: new Date() 
-            } 
+          if (sessionId) {
+            await discoveryEmitter.emit(sessionId, "error", {
+              reason: result.reason || "private_account",
+              message: `Influencer @${cleanInfluencer} is private or skipped.`
+            });
           }
-        );
-
-        if (sessionId) {
-          await discoveryEmitter.emit(sessionId, "completed", {
-            message: `Influencer @${cleanInfluencer} has 0 posts.`
-          });
+          return result;
         }
+
+        const urls = result.discoveredPostUrls || [];
+        const getPostId = (url: string) => {
+          const match = url.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
+          return (match && match[1]) || url;
+        };
+
+        if (urls.length > 0) {
+          // Check if we already scanned this influencer — filter to only new posts
+          const existingInfluencer = await SeedInfluencer.findOne({ username: cleanInfluencer });
+          const lastPostId = existingInfluencer?.lastProcessedPostId;
+          const newestScrapedId = getPostId(urls[0]!);
+
+          console.log(`[NewPostsCheck] @${cleanInfluencer}: lastPostId=${lastPostId ?? "none"}, newestScraped=${newestScrapedId}`);
+
+          let urlsToProcess = urls;
+          if (lastPostId) {
+            // Case 1: newest scraped post IS the same as last stored — no new posts
+            if (newestScrapedId === lastPostId) {
+              console.log(`@${cleanInfluencer} already scanned — newest post matches lastProcessedPostId (${lastPostId}). No new posts.`);
+              if (sessionId) {
+                await discoveryEmitter.emit(sessionId, "already_scanned", {
+                  message: `@${cleanInfluencer} was already scanned. No new posts found since last scan.`
+                });
+              }
+              return {
+                influencerUsername: cleanInfluencer,
+                niche,
+                postsFound: 0,
+                enqueuedCount: 0,
+                status: "already_scanned" as const
+              };
+            }
+
+            // Case 2: find where the old last post appears in the new list
+            const lastIdx = urls.findIndex(u => getPostId(u) === lastPostId);
+            console.log(`[NewPostsCheck] @${cleanInfluencer}: lastIdx=${lastIdx} in ${urls.length} urls`);
+
+            if (lastIdx > 0) {
+              // Only process posts that appear before the last known one (they are newer)
+              urlsToProcess = urls.slice(0, lastIdx);
+              console.log(`@${cleanInfluencer} has ${urlsToProcess.length} new post(s) since last scan.`);
+            }
+            // If lastIdx === -1: old post has rolled off the list entirely — scan all 5 (they are all new)
+          }
+
+          const latestPostId = getPostId(urlsToProcess[0]!);
+
+          await SeedInfluencer.updateOne(
+            { username: cleanInfluencer },
+            {
+              $set: {
+                lastProcessedPostId: latestPostId,
+                isProcessed: true,
+                isActive: false,
+                processedAt: new Date(),
+                updatedAt: new Date()
+              }
+            }
+          );
+
+          if (sessionId) {
+            const postsPayload = urlsToProcess.map((url, idx) => ({
+              postId: getPostId(url),
+              url,
+              caption: `Post #${idx + 1}`,
+              comments_estimated: 10,
+              mediaType: "image"
+            }));
+            await discoveryEmitter.emit(sessionId, "posts_found", { posts: postsPayload });
+          }
+
+          for (const postUrl of urlsToProcess) {
+            const postId = getPostId(postUrl);
+            const jobId = `comments-${postId}`;
+            console.log(`Enqueuing comment scrape for post ${postId} (${postUrl})`);
+
+            await commentScrapeQueue.add(
+              COMMENT_SCRAPE_JOB_NAME,
+              {
+                postUrl,
+                niche,
+                sessionId // Propagate session
+              },
+              { jobId } // Deduplicates at BullMQ queue level
+            );
+            totalEnqueued++;
+          }
+        } else {
+          // 0 posts discovered — either scrape failure or no posts
+          const existingInfluencer = await SeedInfluencer.findOne({ username: cleanInfluencer });
+          const wasAlreadyScanned = !!(existingInfluencer?.lastProcessedPostId);
+
+          await SeedInfluencer.updateOne(
+            { username: cleanInfluencer },
+            {
+              $set: {
+                isProcessed: true,
+                isActive: false,
+                processedAt: new Date(),
+                updatedAt: new Date()
+              }
+            }
+          );
+
+          if (sessionId) {
+            if (wasAlreadyScanned) {
+              // Instagram failed to load posts, but we know this influencer was processed before.
+              // Treat as already_scanned so the user gets a clear message.
+              console.log(`@${cleanInfluencer} 0 posts scraped but was previously scanned (lastPostId=${existingInfluencer?.lastProcessedPostId}). Marking as already_scanned.`);
+              await discoveryEmitter.emit(sessionId, "already_scanned", {
+                message: `@${cleanInfluencer} was already scanned. Could not load new posts — no changes detected.`
+              });
+            } else {
+              await discoveryEmitter.emit(sessionId, "completed", {
+                message: `Influencer @${cleanInfluencer} has 0 posts or profile could not be loaded.`
+              });
+            }
+          }
+        }
+
+        return {
+          influencerUsername: cleanInfluencer,
+          niche,
+          postsFound: urls.length,
+          enqueuedCount: totalEnqueued,
+          status: "success"
+        };
+      } catch (err) {
+        console.error(`Error during influencer scan processing for @${cleanInfluencer}:`, err);
+        if (sessionId) {
+          try {
+            await discoveryEmitter.emit(sessionId, "error", {
+              reason: "scan_failed",
+              message: err instanceof Error ? err.message : String(err)
+            });
+          } catch (emitErr) {
+            console.error("Failed to emit error payload for session:", emitErr);
+          }
+        }
+        throw err;
       }
-      
-      return {
-        influencerUsername: cleanInfluencer,
-        niche,
-        postsFound: urls.length,
-        enqueuedCount: totalEnqueued,
-        status: "success"
-      };
     } else {
       // Fetch active seed influencers from database
       const influencers = await SeedInfluencer.find({ isActive: true });
@@ -232,7 +298,7 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
       for (const influencer of influencers) {
         const cleanInfluencer = influencer.username.replace(/^@/, "").trim().toLowerCase();
         console.log(`Scanning seed influencer: @${cleanInfluencer} (niche: ${influencer.niche})`);
-        
+
         try {
           const result = await scanInfluencer(cleanInfluencer, influencer.niche);
           if (result.status === "skipped") {
@@ -243,7 +309,7 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
             await influencer.save();
             continue;
           }
-          
+
           const urls = result.discoveredPostUrls || [];
           if (urls.length > 0) {
             const getPostId = (url: string) => {
@@ -251,7 +317,7 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
               return (match && match[1]) || url;
             };
             const latestPostId = getPostId(urls[0]!);
-            
+
             influencer.lastProcessedPostId = latestPostId;
             influencer.isProcessed = true;
             influencer.isActive = false;

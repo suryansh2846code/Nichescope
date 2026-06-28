@@ -169,6 +169,16 @@ export default function App() {
   const [drawerSession, setDrawerSession] = useState<{ sessionId: string; username: string; niche: string } | null>(null);
   const [isCreatingList, setIsCreatingList] = useState(false);
 
+  // Niche Group Scan Page States
+  const [scanNiche, setScanNiche] = useState("");
+  const [scanInfluencers, setScanInfluencers] = useState<string[]>(["", "", "", "", ""]);
+  const [scanRunning, setScanRunning] = useState(false);
+  const [scanSessions, setScanSessions] = useState<any[]>([]);
+  const [scanLeads, setScanLeads] = useState<any[]>([]);
+  const [elapsedScanTime, setElapsedScanTime] = useState(0);
+  const [showCompletedModal, setShowCompletedModal] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+
   // Seed Influencer Leads Modal State
   const [selectedInfluencerForLeads, setSelectedInfluencerForLeads] = useState<string | null>(null);
   const [influencerLeadsList, setInfluencerLeadsList] = useState<any[]>([]);
@@ -509,6 +519,162 @@ export default function App() {
     } catch (err) {
       console.error("Error triggering scan:", err);
       alert("Network error triggering scan");
+    }
+  };
+
+  // Active Scan Timer
+  useEffect(() => {
+    if (!scanRunning) return;
+    const interval = setInterval(() => {
+      setElapsedScanTime(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [scanRunning]);
+
+  // Trigger Parallel Niche Scan
+  const handleStartNicheScan = async () => {
+    if (!scanNiche.trim()) {
+      setScanError("Target Niche is required");
+      return;
+    }
+    const enteredInfluencers = scanInfluencers.filter(u => u.trim() !== "");
+    if (enteredInfluencers.length === 0) {
+      setScanError("At least 1 seed influencer username is required");
+      return;
+    }
+    if (enteredInfluencers.length > 5) {
+      setScanError("A maximum of 5 seed influencers can be scanned at a time");
+      return;
+    }
+
+    setScanError(null);
+    setScanRunning(true);
+    setElapsedScanTime(0);
+    setScanLeads([]);
+    setShowCompletedModal(false);
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/discover/run-niche-scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          niche: scanNiche.trim(),
+          usernames: enteredInfluencers
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to trigger scan process");
+      }
+
+      const data = await res.json();
+      
+      const initialSessions = data.runs.map((r: any) => ({
+        username: r.username,
+        sessionId: r.sessionId,
+        status: "running",
+        stats: { postsFound: 0, postsScraped: 0, commentsExtracted: 0, commentsAnalyzed: 0, leadsCreated: 0 }
+      }));
+      setScanSessions(initialSessions);
+
+      const sockets: WebSocket[] = [];
+      const completedSessions = new Set<string>();
+
+      initialSessions.forEach((session: any) => {
+        const ws = new WebSocket(`ws://localhost:3002/ws/discovery/${session.sessionId}`);
+        sockets.push(ws);
+
+        ws.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+
+          setScanSessions(prev => prev.map(s => {
+            if (s.sessionId !== session.sessionId) return s;
+
+            if (msg.type === "history") {
+              const histEvents = msg.events || [];
+              let leads: any[] = [];
+              histEvents.forEach((ev: any) => {
+                if (ev.type === "lead_created") {
+                  leads.push(ev.data);
+                }
+              });
+              if (leads.length > 0) {
+                setScanLeads(currentLeads => {
+                  const uniqueNewLeads = leads.filter(nl => !currentLeads.some(cl => cl.username === nl.username));
+                  return [...currentLeads, ...uniqueNewLeads];
+                });
+              }
+
+              return {
+                ...s,
+                status: msg.status || "running",
+                stats: msg.stats || s.stats
+              };
+            } else {
+              const { type, data } = msg;
+              let statusUpdate = s.status;
+              let statsUpdate = { ...s.stats };
+
+              if (type === "posts_found") {
+                statsUpdate.postsFound = data.posts.length;
+              } else if (type === "comments_extracted") {
+                statsUpdate.postsScraped = statsUpdate.postsScraped + 1;
+                statsUpdate.commentsExtracted = statsUpdate.commentsExtracted + data.commentCount;
+              } else if (type === "comment_analyzed") {
+                statsUpdate.commentsAnalyzed = statsUpdate.commentsAnalyzed + 1;
+              } else if (type === "lead_created") {
+                statsUpdate.leadsCreated = statsUpdate.leadsCreated + 1;
+                setScanLeads(currentLeads => {
+                  if (currentLeads.some(cl => cl.username === data.username)) return currentLeads;
+                  return [...currentLeads, data];
+                });
+              } else if (type === "completed" || type === "stage_complete") {
+                statusUpdate = "completed";
+              } else if (type === "already_scanned") {
+                statusUpdate = "already_scanned";
+              } else if (type === "cancelled") {
+                statusUpdate = "cancelled";
+              } else if (type === "error" || type === "failed") {
+                statusUpdate = "failed";
+              }
+
+              return {
+                ...s,
+                status: statusUpdate,
+                stats: statsUpdate
+              };
+            }
+          }));
+
+          // Check if finished
+          const msgType = msg.type;
+          if (["completed", "stage_complete", "cancelled", "error", "failed", "already_scanned"].includes(msgType)) {
+            completedSessions.add(session.sessionId);
+            ws.close();
+
+            if (completedSessions.size === initialSessions.length) {
+              setScanRunning(false);
+              setShowCompletedModal(true);
+            }
+          }
+        };
+
+        ws.onerror = (err) => {
+          console.error(`Socket error for ${session.username}:`, err);
+          setScanSessions(prev => prev.map(s => s.sessionId === session.sessionId ? { ...s, status: "failed" } : s));
+          completedSessions.add(session.sessionId);
+          if (completedSessions.size === initialSessions.length) {
+            setScanRunning(false);
+            setShowCompletedModal(true);
+          }
+        };
+      });
+
+    } catch (err) {
+      console.error("Error running niche scan:", err);
+      setScanError(err instanceof Error ? err.message : "Error running scan");
+      setScanRunning(false);
     }
   };
 
@@ -1593,538 +1759,244 @@ export default function App() {
           </div>
         </div>
       ) */}
-      {activeTab === "seed-influencers" && (() => {
-        if (activeSession) {
-          return (
-            <LiveDiscoveryPanel
-              sessionId={activeSession.sessionId}
-              influencerUsername={activeSession.username}
-              niche={activeSession.niche}
-              onClose={() => {
-                setActiveSession(null);
-                fetchInfluencers();
-              }}
-              onAddToCrm={handleAddToCrm}
-              crmLeads={crmLeads}
-            />
-          );
-        }
+      {activeTab === "seed-influencers" && (
+        <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
+          {/* Page Help / Description Panel */}
+          <div className="glass-card page-description-banner" style={{ marginBottom: "1.5rem" }}>
+            <h3>🎯 Niche-Targeted Lead Discovery</h3>
+            <p>
+              Enter a target niche and list up to 5 seed influencers. The system will concurrently scan their comment feeds, extract buying intentions, and qualify potential leads for you in real-time.
+            </p>
+          </div>
 
-        const activeInfluencers = influencers.filter(inf => !inf.isProcessed);
-        const processedInfluencers = influencers.filter(inf => inf.isProcessed);
-
-        if (influencers.length === 0 && !isCreatingList) {
-          return (
-            <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
-              <div className="glass-card page-description-banner" style={{ marginBottom: "1.5rem", textAlign: "center", padding: "3rem 1.5rem" }}>
-                <h3 style={{ fontSize: "1.8rem", fontWeight: "bold", margin: 0, color: "#fff" }}>🎯 Seed Influencer Registry</h3>
-                <p style={{ color: "var(--color-text-dim)", maxWidth: "500px", margin: "1rem auto 2rem auto", fontSize: "0.95rem", lineHeight: "1.5" }}>
-                  To start finding qualified leads, you need to add your target seed influencers. Choose a niche and input the list of key influencer accounts to scrape.
-                </p>
-                <button
-                  className="btn btn-primary animate-pulse"
-                  onClick={() => setIsCreatingList(true)}
-                  style={{ padding: "0.75rem 2.5rem", fontSize: "1.1rem" }}
-                >
-                  ✨ Make list of influencer
-                </button>
-              </div>
-            </div>
-          );
-        }
-
-        return (
-          <div className="discovery-container animate-fade-in" style={{ padding: "0 1rem" }}>
-            {/* Page Help / Description Panel */}
-            <div className="glass-card page-description-banner" style={{ marginBottom: "1.5rem" }}>
-              <h3>🎯 Seed Influencer Registry</h3>
-              <p>
-                Manage seed influencer accounts within your target niche. The system monitors their posts and comment feeds to identify potential buyers asking questions or seeking recommendations.
-              </p>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "2rem", alignItems: "start" }}>
+          <div style={{ display: "grid", gridTemplateColumns: scanRunning ? "1fr" : "1fr 1fr", gap: "2rem", alignItems: "start" }}>
+            {/* Left Column: Niche & Influencer inputs — hidden while scan is running */}
+            {!scanRunning && (
               <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>🎯 Manage Seed Influencers</h3>
-                <form onSubmit={handleAddInfluencer} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                  <div className="input-group" style={{ margin: 0 }}>
-                    <label>Instagram Username</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. janesmith_fitness"
-                      value={newInfluencerUsername}
-                      onChange={(e) => setNewInfluencerUsername(e.target.value)}
-                      className="input-field"
-                      style={{
-                        background: "rgba(255, 255, 255, 0.03)",
-                        border: "var(--glass-border)",
-                        borderRadius: "8px",
-                        color: "#fff",
-                        padding: "0.75rem",
-                        outline: "none"
-                      }}
-                    />
-                  </div>
-                  <div className="input-group" style={{ margin: 0 }}>
-                    <label>Target Niche</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. fitness, real_estate"
-                      value={newInfluencerNiche}
-                      onChange={(e) => setNewInfluencerNiche(e.target.value)}
-                      className="input-field"
-                      style={{
-                        background: "rgba(255, 255, 255, 0.03)",
-                        border: "var(--glass-border)",
-                        borderRadius: "8px",
-                        color: "#fff",
-                        padding: "0.75rem",
-                        outline: "none"
-                      }}
-                    />
+                <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>🎯 Target Definition</h3>
+                
+                <div className="input-group" style={{ margin: 0 }}>
+                  <label style={{ fontWeight: "bold", fontSize: "0.85rem" }}>Target Niche</label>
+                  <input
+                    id="scan-niche-input"
+                    type="text"
+                    placeholder="e.g. fitness, beauty, saas"
+                    value={scanNiche}
+                    onChange={(e) => setScanNiche(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        (document.getElementById("scan-influencer-0") as HTMLInputElement)?.focus();
+                      }
+                    }}
+                    disabled={scanRunning}
+                    className="input-field"
+                    style={{
+                      background: "rgba(255, 255, 255, 0.03)",
+                      border: "var(--glass-border)",
+                      borderRadius: "8px",
+                      color: "#fff",
+                      padding: "0.75rem",
+                      outline: "none"
+                    }}
+                  />
+                </div>
+
+                <div style={{ borderTop: "1px solid rgba(255, 255, 255, 0.08)", paddingTop: "1rem" }}>
+                  <h4 style={{ margin: "0 0 0.5rem 0", fontSize: "0.95rem", color: "#fff" }}>👤 Seed Influencer Accounts (Up to 5)</h4>
+                  <p style={{ margin: "0 0 1rem 0", fontSize: "0.8rem", color: "var(--color-text-dim)" }}>
+                    Enter the Instagram usernames of influencers in this niche to find leads from.
+                  </p>
+                  {[0, 1, 2, 3, 4].map((index) => (
+                    <div key={index} className="input-group" style={{ margin: "0.5rem 0" }}>
+                      <input
+                        id={`scan-influencer-${index}`}
+                        type="text"
+                        placeholder={`Influencer username ${index + 1}`}
+                        value={scanInfluencers[index] || ""}
+                        onChange={(e) => {
+                          const updated = [...scanInfluencers];
+                          updated[index] = e.target.value;
+                          setScanInfluencers(updated);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            if (index < 4) {
+                              (document.getElementById(`scan-influencer-${index + 1}`) as HTMLInputElement)?.focus();
+                            }
+                          }
+                        }}
+                        disabled={scanRunning}
+                        className="input-field"
+                        style={{
+                          background: "rgba(255, 255, 255, 0.03)",
+                          border: "var(--glass-border)",
+                          borderRadius: "8px",
+                          color: "#fff",
+                          padding: "0.75rem",
+                          outline: "none"
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Right Column: Scan status & execution control panel */}
+            <div className="glass-card" style={{ display: "flex", flexDirection: "column", gap: "1.25rem", minHeight: "400px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0 }}>⚡ Scan Control Panel</h3>
+                {scanRunning && (
+                  <span style={{
+                    background: "rgba(0, 186, 255, 0.1)",
+                    color: "#00baff",
+                    padding: "0.25rem 0.5rem",
+                    borderRadius: "4px",
+                    fontSize: "0.75rem",
+                    fontWeight: "bold"
+                  }}>
+                    ⏱️ Running: {elapsedScanTime}s
+                  </span>
+                )}
+              </div>
+
+              {scanError && <div className="toast toast-error">{scanError}</div>}
+
+              {!scanRunning ? (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, padding: "2rem", textAlign: "center", gap: "1.5rem" }}>
+                  <div style={{ fontSize: "3rem" }}>🚀</div>
+                  <div>
+                    <h4 style={{ color: "#fff", margin: "0 0 0.5rem 0" }}>Ready to Start</h4>
+                    <p style={{ color: "var(--color-text-dim)", fontSize: "0.85rem", maxWidth: "300px", margin: 0 }}>
+                      Define your target niche and list target influencers on the left, then click run to start the parallel discovery scan.
+                    </p>
                   </div>
                   <button
-                    type="submit"
-                    className="btn btn-primary"
+                    onClick={handleStartNicheScan}
+                    className="btn btn-primary animate-pulse"
+                    style={{ width: "100%", padding: "0.85rem", fontSize: "1rem" }}
                   >
-                    Add Seed Influencer
-                  </button>
-                </form>
-                {influencerError && <div className="toast toast-error">{influencerError}</div>}
-
-                <div className="glass-card" style={{ padding: "1rem", marginTop: "1rem", background: "rgba(0,0,0,0.2)" }}>
-                  <h4 style={{ color: "#fff", fontSize: "0.9rem", marginBottom: "0.5rem" }}>⚙️ Control Center</h4>
-                  <p style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "1rem" }}>
-                    Trigger a manual scan of all active seed influencers. This checks their 5 most recent posts for new comments to scrape and analyze.
-                  </p>
-                  <button
-                    onClick={handleTriggerInfluencerScan}
-                    className="btn btn-secondary"
-                    style={{ width: "100%" }}
-                  >
-                    🚀 Run Discovery Scan Now
+                    🚀 Run Niche Scan
                   </button>
                 </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem", flex: 1 }}>
+                  <div style={{
+                    background: "rgba(0, 186, 255, 0.05)",
+                    border: "1px solid rgba(0, 186, 255, 0.15)",
+                    borderRadius: "8px",
+                    padding: "0.6rem 1rem",
+                    fontSize: "0.8rem",
+                    color: "#a5e2ff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between"
+                  }}>
+                    <span>🔄 Parallel scan in progress — results will pop up when complete.</span>
+                    <span style={{ fontWeight: "bold", color: "#00baff", whiteSpace: "nowrap" }}>⏱️ {elapsedScanTime}s</span>
+                  </div>
 
-                {/* Niche Group Scans Card */}
-                <div className="glass-card" style={{ padding: "1rem", marginTop: "1rem", background: "rgba(0,0,0,0.2)" }}>
-                  <h4 style={{ color: "#fff", fontSize: "0.9rem", marginBottom: "0.5rem" }}>⚡ Niche Group Scans</h4>
-                  <p style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", marginBottom: "1rem" }}>
-                    Run scans for active influencers grouped by niche.
-                    <br />
-                    <em>Limit: 1 to 5 active seeds per process.</em>
-                  </p>
-                  {(() => {
-                    const nicheGroups: Record<string, { total: number; active: number }> = {};
-                    influencers.forEach(inf => {
-                      const n = (inf.niche || "").trim().toLowerCase();
-                      if (!n) return;
-                      if (!nicheGroups[n]) {
-                        nicheGroups[n] = { total: 0, active: 0 };
-                      }
-                      nicheGroups[n].total++;
-                      if (inf.isActive && !inf.isProcessed) {
-                        nicheGroups[n].active++;
-                      }
-                    });
-
-                    const uniqueNiches = Object.keys(nicheGroups);
-
-                    if (uniqueNiches.length === 0) {
-                      return (
-                        <div style={{ fontSize: "0.8rem", color: "var(--color-text-dim)", textAlign: "center", padding: "0.5rem" }}>
-                          No niches found.
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                        {uniqueNiches.map(nicheName => {
-                          const group = nicheGroups[nicheName];
-                          const isValid = group.active >= 1 && group.active <= 5;
-                          const nicheLabel = nicheName.charAt(0).toUpperCase() + nicheName.slice(1);
-
-                          return (
-                            <div
-                              key={nicheName}
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                padding: "0.5rem",
-                                background: "rgba(255, 255, 255, 0.02)",
-                                border: "1px solid rgba(255, 255, 255, 0.04)",
-                                borderRadius: "6px"
-                              }}
-                            >
-                              <div>
-                                <div style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#fff" }}>
-                                  {nicheLabel}
-                                </div>
-                                <div style={{ fontSize: "0.7rem", color: "var(--color-text-dim)" }}>
-                                  {group.active} active / {group.total} total
-                                </div>
-                              </div>
-
-                              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.2rem" }}>
-                                <button
-                                  onClick={() => handleRunNicheGroupScan(nicheName)}
-                                  className="btn btn-primary"
-                                  style={{
-                                    padding: "0.25rem 0.5rem",
-                                    fontSize: "0.75rem",
-                                    margin: 0,
-                                    minWidth: "auto",
-                                    background: isValid ? "var(--color-accent)" : "rgba(255,255,255,0.05)",
-                                    borderColor: isValid ? "var(--color-accent)" : "transparent",
-                                    color: isValid ? "#fff" : "var(--color-text-dim)",
-                                    cursor: isValid ? "pointer" : "not-allowed"
-                                  }}
-                                  disabled={!isValid}
-                                >
-                                  🚀 Run Group
-                                </button>
-                                {!isValid && (
-                                  <span style={{ fontSize: "0.6rem", color: "#ff4566", fontWeight: "bold" }}>
-                                    {group.active === 0 ? "Requires ≥1 active" : "Max 5 active exceeded"}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-                {/* Table 1: Active Monitoring Targets */}
-                <div className="glass-card card-table">
-                  <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>🎯 Active Monitoring Targets ({activeInfluencers.length})</h3>
-                  {activeInfluencers.length === 0 ? (
-                    <div style={{ textAlign: "center", padding: "2.5rem", color: "var(--color-text-dim)" }}>
-                      No active seed influencers in queue. Add targets or re-activate processed seeds.
-                    </div>
-                  ) : (
-                    <div className="table-responsive">
-                      <table className="leads-table">
-                        <thead>
-                          <tr>
-                            <th>Username</th>
-                            <th>Niche</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {activeInfluencers.map((inf, idx) => (
-                            <tr key={idx} className="lead-row">
-                              <td style={{ fontWeight: "bold" }}>@{inf.username}</td>
-                              <td>
-                                <span style={{
-                                  background: "rgba(0, 186, 255, 0.1)",
-                                  color: "#00baff",
-                                  padding: "0.2rem 0.5rem",
-                                  borderRadius: "4px",
-                                  fontSize: "0.75rem",
-                                  fontWeight: "bold"
-                                }}>
-                                  {inf.niche}
-                                </span>
-                              </td>
-                              <td>
-                                <span className={`status-badge ${inf.isActive ? "status-active" : "status-failed"}`} style={{
-                                  background: inf.isActive ? "rgba(34, 197, 94, 0.15)" : "rgba(239, 68, 68, 0.15)",
-                                  color: inf.isActive ? "#22c55e" : "#ef4444",
-                                  borderColor: inf.isActive ? "#22c55e" : "#ef4444"
-                                }}>
-                                  {inf.isActive ? "Active" : "Paused"}
-                                </span>
-                              </td>
-                              <td>
-                                <div style={{ display: "flex", gap: "0.5rem" }}>
-                                  <button
-                                    onClick={() => handleRunInfluencer(inf.username)}
-                                    className="btn btn-primary"
-                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
-                                    disabled={!inf.isActive}
-                                    title={inf.isActive ? "Start discovery scan" : "Activate first to scan"}
-                                  >
-                                    ⚡ Run Scan
-                                  </button>
-                                  <button
-                                    onClick={() => handleToggleInfluencer(inf.username)}
-                                    className="btn btn-secondary"
-                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
-                                  >
-                                    {inf.isActive ? "Pause" : "Activate"}
-                                  </button>
-                                  <button
-                                    onClick={() => handleOpenDrawerForInfluencer(inf.username)}
-                                    className="btn btn-secondary"
-                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#a78bfa", borderColor: "rgba(167, 139, 250, 0.3)" }}
-                                  >
-                                    🔍 Status
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeleteInfluencer(inf.username)}
-                                    className="btn btn-secondary"
-                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#ff4566", borderColor: "rgba(255,69,102,0.3)" }}
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-
-                {/* Table 2: Processed Seeds Summary */}
-                <div className="glass-card card-table">
-                  <h3 className="card-title" style={{ fontSize: "1.2rem", margin: 0, marginBottom: "1rem" }}>✅ Processed Seeds Summary ({processedInfluencers.length})</h3>
-                  {processedInfluencers.length === 0 ? (
-                    <div style={{ textAlign: "center", padding: "2.5rem", color: "var(--color-text-dim)" }}>
-                      No completed scans yet. Run scans on active targets to view summaries.
-                    </div>
-                  ) : (
-                    <div className="table-responsive">
-                      <table className="leads-table">
-                        <thead>
-                          <tr>
-                            <th>Username</th>
-                            <th>Niche</th>
-                            <th>Processed Date</th>
-                            <th>Scrape Stats</th>
-                            <th>Leads Count</th>
-                            <th>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {processedInfluencers.map((inf, idx) => (
-                            <tr key={idx} className="lead-row">
-                              <td style={{ fontWeight: "bold" }}>@{inf.username}</td>
-                              <td>
-                                <span style={{
-                                  background: "rgba(34, 197, 94, 0.1)",
-                                  color: "#22c55e",
-                                  padding: "0.2rem 0.5rem",
-                                  borderRadius: "4px",
-                                  fontSize: "0.75rem",
-                                  fontWeight: "bold"
-                                }}>
-                                  {inf.niche}
-                                </span>
-                              </td>
-                              <td style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>
-                                {inf.processedAt ? new Date(inf.processedAt).toLocaleString() : "Recently"}
-                              </td>
-                              <td style={{ fontSize: "0.8rem" }}>
-                                <div style={{ display: "flex", gap: "0.5rem", color: "var(--color-text-dim)" }}>
-                                  <span>posts: <strong style={{ color: "#fff" }}>{inf.postsCount || 0}</strong></span>
-                                  <span>comments: <strong style={{ color: "#fff" }}>{inf.commentsCount || 0}</strong></span>
-                                </div>
-                              </td>
-                              <td>
-                                <button
-                                  onClick={() => fetchInfluencerLeads(inf.username)}
-                                  style={{
-                                    background: inf.leadsCount > 0 ? "rgba(167, 139, 250, 0.15)" : "rgba(255, 255, 255, 0.03)",
-                                    border: inf.leadsCount > 0 ? "1px solid #a78bfa" : "var(--glass-border)",
-                                    color: inf.leadsCount > 0 ? "#c084fc" : "var(--color-text-dim)",
-                                    padding: "0.25rem 0.6rem",
-                                    borderRadius: "6px",
-                                    fontSize: "0.8rem",
-                                    fontWeight: "bold",
-                                    cursor: "pointer",
-                                    transition: "all 0.2s"
-                                  }}
-                                >
-                                  💡 {inf.leadsCount || 0} Leads
-                                </button>
-                              </td>
-                              <td>
-                                <div style={{ display: "flex", gap: "0.5rem" }}>
-                                  <button
-                                    onClick={() => handleRunInfluencer(inf.username)}
-                                    className="btn btn-secondary"
-                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "var(--color-accent)", borderColor: "rgba(0, 186, 255, 0.3)" }}
-                                  >
-                                    🔄 Run Again
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      try {
-                                        const res = await fetch(`${API_BASE_URL}/discover/influencers/${inf.username}/latest-session`);
-                                        if (res.ok) {
-                                          const data = await res.json();
-                                          setActiveSession({
-                                            sessionId: data.sessionId,
-                                            username: data.username,
-                                            niche: data.niche
-                                          });
-                                        } else {
-                                          alert("No session history found for this influencer");
-                                        }
-                                      } catch (err) {
-                                        console.error("Error fetching latest session:", err);
-                                        alert("Failed to load session history");
-                                      }
-                                    }}
-                                    className="btn btn-secondary"
-                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#a78bfa", borderColor: "rgba(167, 139, 250, 0.3)" }}
-                                  >
-                                    📊 View Session
-                                  </button>
-                                  <button
-                                    onClick={() => handleOpenDrawerForInfluencer(inf.username)}
-                                    className="btn btn-secondary"
-                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#a78bfa", borderColor: "rgba(167, 139, 250, 0.3)" }}
-                                  >
-                                    🔍 Status
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeleteInfluencer(inf.username)}
-                                    className="btn btn-secondary"
-                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0, color: "#ff4566", borderColor: "rgba(255,69,102,0.3)" }}
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-          {/* Detailed Leads Panel for Selected Influencer */}
-          {selectedInfluencerForLeads && (
-            <div className="glass-card animate-fade-in" style={{ marginTop: "2rem", padding: "1.5rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
-                <div>
-                  <h3 style={{ fontSize: "1.2rem", fontWeight: "bold", margin: 0, color: "#fff" }}>
-                    📥 Qualified Leads from @{selectedInfluencerForLeads}
-                  </h3>
-                  <p style={{ margin: "0.25rem 0 0 0", color: "var(--color-text-dim)", fontSize: "0.85rem" }}>
-                    Commenters who showed buying intent on posts of this influencer.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setSelectedInfluencerForLeads(null)}
-                  className="btn btn-secondary"
-                  style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
-                >
-                  Close Panel
-                </button>
-              </div>
-
-              {influencerLeadsLoading && (
-                <div style={{ textAlign: "center", padding: "2rem" }}>
-                  <div className="spinner" style={{ margin: "0 auto 1rem auto" }}></div>
-                  <p style={{ color: "var(--color-text-dim)" }}>Loading leads...</p>
-                </div>
-              )}
-
-              {influencerLeadsError && (
-                <div className="toast toast-error">{influencerLeadsError}</div>
-              )}
-
-              {!influencerLeadsLoading && !influencerLeadsError && influencerLeadsList.length === 0 && (
-                <div style={{ textAlign: "center", padding: "2rem", color: "var(--color-text-dim)" }}>
-                  No qualified leads found for this influencer yet. Make sure to run discovery scan.
-                </div>
-              )}
-
-              {!influencerLeadsLoading && !influencerLeadsError && influencerLeadsList.length > 0 && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "1rem" }}>
-                  {influencerLeadsList.map((lead, idx) => {
-                    const inCrm = crmLeads.some(cl => cl.username.toLowerCase() === lead.username.toLowerCase());
-                    return (
-                      <div key={idx} className="glass-card" style={{ padding: "1.25rem", background: "rgba(255, 255, 255, 0.02)", border: "var(--glass-border)", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+                    {scanSessions.map((session, idx) => (
+                      <div key={idx} style={{
+                        background: "rgba(255, 255, 255, 0.02)",
+                        border: `1px solid ${
+                          session.status === "completed" ? "rgba(34,197,94,0.2)"
+                          : session.status === "already_scanned" ? "rgba(56,189,248,0.2)"
+                          : session.status === "failed" ? "rgba(255,69,102,0.2)"
+                          : "rgba(255,255,255,0.06)"
+                        }`,
+                        borderRadius: "8px",
+                        padding: "0.85rem 1rem",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.5rem"
+                      }}>
+                        {/* Header row */}
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontWeight: "bold", color: "#a78bfa", fontSize: "1rem" }}>@{lead.username}</span>
+                          <span style={{ fontWeight: "bold", color: "#fff", fontSize: "0.9rem" }}>@{session.username}</span>
                           <span style={{
-                            fontSize: "0.75rem",
+                            fontSize: "0.68rem",
                             fontWeight: "bold",
-                            color: lead.qualification?.urgency === "high" ? "#ff4566" : lead.qualification?.urgency === "medium" ? "#ffd166" : "#00baff",
-                            background: lead.qualification?.urgency === "high" ? "rgba(255,69,102,0.15)" : lead.qualification?.urgency === "medium" ? "rgba(255,209,102,0.15)" : "rgba(0,186,255,0.15)",
-                            padding: "0.15rem 0.35rem",
-                            borderRadius: "4px"
+                            color: session.status === "completed" ? "#22c55e"
+                              : session.status === "already_scanned" ? "#38bdf8"
+                              : session.status === "failed" ? "#ff4566"
+                              : "#ffd166",
+                            background: session.status === "completed" ? "rgba(34, 197, 94, 0.12)"
+                              : session.status === "already_scanned" ? "rgba(56, 189, 248, 0.12)"
+                              : session.status === "failed" ? "rgba(255,69,102,0.12)"
+                              : "rgba(255,209,102,0.12)",
+                            padding: "0.15rem 0.4rem",
+                            borderRadius: "4px",
+                            letterSpacing: "0.03em"
                           }}>
-                            {lead.qualification?.urgency?.toUpperCase() || "LOW"} URGENCY
+                            {session.status === "already_scanned" ? "ALREADY SCANNED" : session.status.toUpperCase()}
                           </span>
                         </div>
-                        <p style={{ margin: 0, fontSize: "0.85rem", color: "#eee", fontStyle: "italic", background: "rgba(0,0,0,0.2)", padding: "0.5rem", borderRadius: "4px" }}>
-                          &ldquo;{lead.commentText}&rdquo;
-                        </p>
-                        {lead.qualification ? (
-                          <>
-                            <p style={{ margin: 0, fontSize: "0.85rem", color: "#eee" }}>
-                              <strong>Problem:</strong> {lead.qualification.problem}
-                            </p>
-                            <p style={{ margin: 0, fontSize: "0.85rem", color: "#eee" }}>
-                              <strong>Service:</strong> {lead.qualification.serviceNeeded}
-                            </p>
-                            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-dim)" }}>
-                              <strong>Reason:</strong> {lead.qualification.qualificationReason}
-                            </p>
-                          </>
-                        ) : (
-                          <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--color-text-dim)", fontStyle: "italic" }}>
-                            Lead profile/following list scrape in queue...
-                          </p>
-                        )}
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "0.5rem" }}>
-                          <span style={{ fontSize: "0.75rem", color: "var(--color-text-dim)" }}>
-                            🎯 Intent: {lead.intentScore}%
-                          </span>
-                          <div style={{ display: "flex", gap: "0.5rem" }}>
-                            {lead.qualification && (
-                              <button
-                                onClick={() => {
-                                  setActiveTab("qualified");
-                                  fetchInboxLeadDetails(lead.username);
-                                }}
-                                className="btn btn-secondary"
-                                style={{ padding: "0.25rem 0.5rem", fontSize: "0.7rem", minWidth: "auto", margin: 0 }}
-                              >
-                                View Details
-                              </button>
-                            )}
-                            {inCrm ? (
-                              <span style={{ color: "var(--color-success)", fontWeight: "bold", fontSize: "0.75rem", alignSelf: "center" }}>✅ In CRM</span>
-                            ) : (
-                              <button
-                                onClick={() => handleAddToCrm(lead.username)}
-                                className="btn btn-primary"
-                                style={{ padding: "0.25rem 0.5rem", fontSize: "0.7rem", minWidth: "auto", margin: 0 }}
-                              >
-                                Add to CRM
-                              </button>
-                            )}
+
+                        {/* Stats grid */}
+                        <div style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(4, 1fr)",
+                          gap: "0.4rem",
+                          fontSize: "0.72rem",
+                          color: "var(--color-text-dim)"
+                        }}>
+                          <div>
+                            <div>Posts</div>
+                            <strong style={{ color: "#fff" }}>{session.stats.postsScraped}/{session.stats.postsFound}</strong>
+                          </div>
+                          <div>
+                            <div>Comments</div>
+                            <strong style={{ color: "#fff" }}>{session.stats.commentsExtracted}</strong>
+                          </div>
+                          <div>
+                            <div>Analyzed</div>
+                            <strong style={{ color: "#fff" }}>{session.stats.commentsAnalyzed}</strong>
+                          </div>
+                          <div>
+                            <div>Leads</div>
+                            <strong style={{ color: "var(--color-success)" }}>{session.stats.leadsCreated}</strong>
                           </div>
                         </div>
+
+                        {/* Already scanned notice */}
+                        {session.status === "already_scanned" && (
+                          <div style={{
+                            fontSize: "0.7rem",
+                            color: "#38bdf8",
+                            background: "rgba(56, 189, 248, 0.07)",
+                            border: "1px solid rgba(56, 189, 248, 0.18)",
+                            borderRadius: "5px",
+                            padding: "0.35rem 0.6rem"
+                          }}>
+                            ℹ️ No new posts since last scan. Search section has previous leads.
+                          </div>
+                        )}
+
+                        {/* Live progress bar */}
+                        {session.status === "running" && (
+                          <div style={{ width: "100%", height: "3px", background: "rgba(255,255,255,0.05)", borderRadius: "2px", overflow: "hidden" }}>
+                            <div className="animate-pulse" style={{
+                              width: session.stats.postsFound > 0
+                                ? `${Math.min(100, (session.stats.postsScraped / session.stats.postsFound) * 100)}%`
+                                : "25%",
+                              height: "100%",
+                              background: "var(--color-accent)"
+                            }} />
+                          </div>
+                        )}
                       </div>
-                    );
-                  })}
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
-          )}
           </div>
-        );
-      })()}
+        </div>
+      )}
 
       {activeTab === "qualified" && (
         <div className="inbox-container animate-fade-in" style={{ padding: "0 1rem" }}>
@@ -4267,6 +4139,225 @@ export default function App() {
         </div>
       )}
 
+
+      {showCompletedModal && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(10, 5, 25, 0.75)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 10000,
+          padding: "2rem"
+        }}>
+          <div className="glass-card" style={{
+            width: "100%",
+            maxWidth: "1000px",
+            background: "rgba(25, 12, 50, 0.45)",
+            border: "1px solid rgba(255, 255, 255, 0.08)",
+            borderRadius: "16px",
+            boxShadow: "0 20px 50px rgba(0, 0, 0, 0.5)",
+            padding: "2rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "1.5rem",
+            maxHeight: "90vh",
+            overflowY: "auto"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <h2 style={{ fontSize: "1.75rem", fontWeight: "bold", margin: 0, color: "#fff", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                🎉 Scan Complete
+              </h2>
+              <button
+                onClick={() => setShowCompletedModal(false)}
+                className="btn btn-secondary"
+                style={{ padding: "0.5rem 1rem", minWidth: "auto", margin: 0 }}
+              >
+                Close Window
+              </button>
+            </div>
+
+            {/* Summary metrics bar */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: "1rem",
+              background: "rgba(255, 255, 255, 0.02)",
+              border: "1px solid rgba(255, 255, 255, 0.04)",
+              borderRadius: "10px",
+              padding: "1.25rem"
+            }}>
+              <div>
+                <div style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>Target Niche</div>
+                <div style={{ fontSize: "1.2rem", fontWeight: "bold", color: "#00baff" }}>
+                  {scanNiche}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>Scanned Accounts</div>
+                <div style={{ fontSize: "1.2rem", fontWeight: "bold", color: "#fff" }}>
+                  {scanSessions.length}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>Elapsed Duration</div>
+                <div style={{ fontSize: "1.2rem", fontWeight: "bold", color: "#fff" }}>
+                  {elapsedScanTime}s
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>Qualified under "{scanNiche}"</div>
+                <div style={{ fontSize: "1.2rem", fontWeight: "bold", color: "var(--color-success)" }}>
+                  {scanLeads.filter(lead => (lead.niche || "").trim().toLowerCase() === scanNiche.trim().toLowerCase()).length}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.8rem", color: "var(--color-text-dim)" }}>Saved to DB (Other Niches)</div>
+                <div style={{ fontSize: "1.2rem", fontWeight: "bold", color: "var(--color-accent)" }}>
+                  {scanLeads.filter(lead => (lead.niche || "").trim().toLowerCase() !== scanNiche.trim().toLowerCase()).length}
+                </div>
+              </div>
+            </div>
+
+            {/* Already-scanned notice if applicable */}
+            {scanSessions.some(s => s.status === "already_scanned") && (
+              <div style={{
+                background: "rgba(56, 189, 248, 0.08)",
+                border: "1px solid rgba(56, 189, 248, 0.25)",
+                borderRadius: "10px",
+                padding: "1rem 1.25rem",
+                display: "flex",
+                gap: "0.75rem",
+                alignItems: "flex-start"
+              }}>
+                <span style={{ fontSize: "1.2rem" }}>ℹ️</span>
+                <div>
+                  <div style={{ color: "#38bdf8", fontWeight: "bold", fontSize: "0.9rem", marginBottom: "0.25rem" }}>
+                    {scanSessions.every(s => s.status === "already_scanned")
+                      ? "All influencers were already scanned — no new posts found."
+                      : `${scanSessions.filter(s => s.status === "already_scanned").length} influencer(s) had no new posts since their last scan.`}
+                  </div>
+                  <div style={{ color: "var(--color-text-dim)", fontSize: "0.8rem" }}>
+                    Previously collected leads from these accounts are available in the <strong style={{ color: "#fff" }}>Search</strong> section where you can filter by niche.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Explanation banner */}
+            <div style={{
+              background: "rgba(0, 186, 255, 0.05)",
+              border: "1px solid rgba(0, 186, 255, 0.15)",
+              borderRadius: "8px",
+              padding: "0.75rem 1rem",
+              fontSize: "0.85rem",
+              color: "#a5e2ff",
+              lineHeight: "1.4"
+            }}>
+              💡 <strong>Niche Filtering Applied</strong>: The table below displays only the leads that qualify directly under the target niche <strong>{scanNiche}</strong>. An additional {scanLeads.filter(lead => (lead.niche || "").trim().toLowerCase() !== scanNiche.trim().toLowerCase()).length} qualified leads belonging to other niches were detected and saved to the database silently (searchable on the Home page).
+            </div>
+
+            {/* Results Table */}
+            <div style={{ flex: 1, overflowY: "auto", minHeight: "250px" }} className="table-responsive">
+              {(() => {
+                const targetLower = scanNiche.trim().toLowerCase();
+                const matchedLeads = scanLeads.filter(lead => (lead.niche || "").trim().toLowerCase() === targetLower);
+
+                if (matchedLeads.length === 0) {
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--color-text-dim)", gap: "0.5rem", padding: "3rem" }}>
+                      <span>🔍</span>
+                      <span>No leads found matching niche "{scanNiche}" in this scan.</span>
+                    </div>
+                  );
+                }
+
+                return (
+                  <table className="leads-table">
+                    <thead>
+                      <tr>
+                        <th>Username</th>
+                        <th>Followers</th>
+                        <th>Origin Comment</th>
+                        <th>Intent Score</th>
+                        <th>Problem / Need</th>
+                        <th>Urgency</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {matchedLeads.map((lead, idx) => {
+                        const inCrm = crmLeads.some(cl => cl.username.toLowerCase() === lead.username.toLowerCase());
+                        const urgencyColor = lead.qualification?.urgency === "high" ? "#ff4566" : lead.qualification?.urgency === "medium" ? "#ffd166" : "#00baff";
+                        const urgencyBg = lead.qualification?.urgency === "high" ? "rgba(255,69,102,0.15)" : lead.qualification?.urgency === "medium" ? "rgba(255,209,102,0.15)" : "rgba(0,186,255,0.15)";
+                        
+                        return (
+                          <tr key={idx} className="lead-row">
+                            <td style={{ fontWeight: "bold" }}>
+                              <a
+                                href={lead.profileUrl || `https://instagram.com/${lead.username}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ color: "#a78bfa", textDecoration: "none" }}
+                              >
+                                @{lead.username}
+                              </a>
+                            </td>
+                            <td>{lead.followerCount?.toLocaleString() || "N/A"}</td>
+                            <td style={{ maxWidth: "250px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={lead.originComment}>
+                              {lead.originComment}
+                            </td>
+                            <td style={{ fontWeight: "bold" }}>
+                              {lead.score || lead.intentScore || 0}%
+                            </td>
+                            <td style={{ fontSize: "0.85rem", color: "#eee" }}>
+                              <div style={{ fontWeight: "bold", color: "#ffd166" }}>{lead.qualification?.problem || "N/A"}</div>
+                              <div style={{ color: "var(--color-text-dim)" }}>{lead.qualification?.serviceNeeded || "N/A"}</div>
+                            </td>
+                            <td>
+                              <span style={{
+                                fontSize: "0.7rem",
+                                fontWeight: "bold",
+                                color: urgencyColor,
+                                background: urgencyBg,
+                                padding: "0.15rem 0.4rem",
+                                borderRadius: "4px"
+                              }}>
+                                {lead.qualification?.urgency?.toUpperCase() || "LOW"}
+                              </span>
+                            </td>
+                            <td>
+                              <div style={{ display: "flex", gap: "0.5rem" }}>
+                                {inCrm ? (
+                                  <span style={{ color: "var(--color-success)", fontWeight: "bold", fontSize: "0.8rem", alignSelf: "center" }}>✅ In CRM</span>
+                                ) : (
+                                  <button
+                                    onClick={() => handleAddToCrm(lead.username)}
+                                    className="btn btn-primary"
+                                    style={{ padding: "0.3rem 0.6rem", fontSize: "0.75rem", minWidth: "auto", margin: 0 }}
+                                  >
+                                    Add to CRM
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
 
       {drawerSession && (
         <InfluencerStatusDrawer

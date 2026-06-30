@@ -222,7 +222,9 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
 
           for (const postUrl of urlsToProcess) {
             const postId = getPostId(postUrl);
-            const jobId = `comments-${postId}`;
+            // Include sessionId so each scan gets its own jobs (prevents BullMQ
+            // dedup from silently dropping re-scans of the same posts)
+            const jobId = sessionId ? `comments-${postId}-${sessionId}` : `comments-${postId}`;
             console.log(`Enqueuing comment scrape for post ${postId} (${postUrl})`);
 
             await commentScrapeQueue.add(
@@ -232,7 +234,7 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
                 niche,
                 sessionId // Propagate session
               },
-              { jobId } // Deduplicates at BullMQ queue level
+              { jobId } // Deduplicates within this session only
             );
             totalEnqueued++;
           }
@@ -335,8 +337,9 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
                 {
                   postUrl,
                   niche: influencer.niche,
+                  sessionId,
                 },
-                { jobId } // Deduplicates at BullMQ queue level
+                { jobId }
               );
               totalEnqueued++;
             }

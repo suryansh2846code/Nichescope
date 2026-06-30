@@ -70,16 +70,16 @@ const worker = new Worker<CommentAnalysisJobData>(
         });
       }
 
-      // If the comment passes the AI lead gate, trigger a profile + following list scrape
+      // If the comment passes the AI lead gate, create a lead immediately and enqueue profile enrichment
       if (result.isLead) {
         console.log(`[QUALIFIED COMMENT] @${normalizedUser} showed lead intent. Checking duplication...`);
 
         // Check if lead already exists in Leads DB
-        const leadExists = await Lead.exists({
+        const existingLead = await Lead.findOne({
           username: new RegExp(`^${normalizedUser}$`, "i"),
         });
 
-        if (leadExists) {
+        if (existingLead) {
           console.log(`Lead for @${normalizedUser} already exists. Skipping profile scrape.`);
           return {
             username: normalizedUser,
@@ -89,20 +89,38 @@ const worker = new Worker<CommentAnalysisJobData>(
           };
         }
 
-        // Trigger profile + following scrape, then analyze following for boost
+        // Create placeholder lead immediately so it's never lost to scrape timeouts
+        await Lead.create({
+          username: normalizedUser,
+          fullName: "",
+          bio: "",
+          profileUrl: `https://www.instagram.com/${normalizedUser}/`,
+          niche,
+          foundVia: "comment-analysis",
+          scrapedAt: new Date(),
+          rawData: { commentText, postUrl, category: result.category, intent: result.intent },
+        });
+        console.log(`[LEAD SAVED] Created placeholder lead for @${normalizedUser}`);
+
+        if (sessionId) {
+          await discoveryEmitter.emit(sessionId, "lead_created", {
+            username: normalizedUser,
+            niche,
+            postUrl,
+            category: result.category,
+            intent: result.intent,
+          });
+        }
+
+        // Enqueue profile scrape to enrich the placeholder with real profile data
         const scrapeJobId = `scrape-${normalizedUser}-${Date.now()}`;
-        console.log(`Enqueuing profile & following scrape for @${normalizedUser}`);
-        
-        // Store following analysis job id so we can track it
-        const followingJobId = `following-${normalizedUser}-${Date.now()}`;
-        
+        console.log(`Enqueuing profile enrichment scrape for @${normalizedUser}`);
         await scrapeQueue.add(
           SCRAPE_PROFILE_JOB_NAME,
           {
             username: normalizedUser,
             niche,
-            followingJobId, // Pass this so scrapeWorker can pick it up
-            sessionId, // Propagate session
+            sessionId,
           },
           { jobId: scrapeJobId }
         );
@@ -110,7 +128,7 @@ const worker = new Worker<CommentAnalysisJobData>(
         return {
           username: normalizedUser,
           isLead: true,
-          action: "enqueued_profile_scrape",
+          action: "lead_created_and_enqueued_enrichment",
           commentAnalysisId: commentAnalysis._id,
         };
       }

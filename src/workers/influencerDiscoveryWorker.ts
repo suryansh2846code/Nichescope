@@ -386,4 +386,10 @@ worker.on("stalled", (jobId) => {
   console.warn(`[WARN] Influencer discovery job ${jobId} stalled (took too long) — it will be retried or failed.`);
 });
 
+// CRITICAL: Without this handler, BullMQ's lock renewal errors become uncaught
+// exceptions that crash the entire worker process.
+worker.on("error", (err) => {
+  console.error(`[WORKER:ERROR] Influencer discovery worker error (non-fatal): ${err.message}`);
+});
+
 console.log(`Influencer discovery worker listening on "${INFLUENCER_DISCOVERY_QUEUE_NAME}" queue`);

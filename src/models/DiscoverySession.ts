@@ -10,7 +10,7 @@ export interface DiscoverySessionAttrs {
   sessionId: string;
   username: string;
   niche: string;
-  status: "running" | "paused" | "cancelled" | "completed" | "failed";
+  status: "running" | "paused" | "cancelled" | "completed" | "failed" | "already_scanned";
   stats: {
     postsFound: number;
     postsScraped: number;
@@ -62,7 +62,7 @@ const discoverySessionSchema = new Schema(
     },
     status: {
       type: String,
-      enum: ["running", "paused", "cancelled", "completed", "failed"],
+      enum: ["running", "paused", "cancelled", "completed", "failed", "already_scanned"],
       default: "running",
       index: true,
     },

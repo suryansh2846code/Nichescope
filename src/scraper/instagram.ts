@@ -276,7 +276,7 @@ export async function collectRecentPostUrls(
       const results: string[] = [];
       for (const a of anchors) {
         const raw = a.getAttribute("href") || "";
-        if (!raw.match(/\/(p|reel|reels)\//)) continue;
+        if (!raw.match(/\/(p|reel|reels)\/[A-Za-z0-9_-]+/)) continue;
         const normalised = raw.replace(/^\/reels\//, "/reel/");
         const abs = `${baseUrl}${normalised}`;
         const parts = abs.split("?");
@@ -805,7 +805,7 @@ export async function scrapeHashtag(
         const results: string[] = [];
         for (const a of anchors) {
           const raw = a.getAttribute("href") || "";
-          if (!raw.match(/\/(p|reel|reels)\//)) continue;
+          if (!raw.match(/\/(p|reel|reels)\/[A-Za-z0-9_-]+/)) continue;
           const normalised = raw.replace(/^\/reels\//, "/reel/");
           const abs = `${baseUrl}${normalised}`;
           const parts = abs.split("?");

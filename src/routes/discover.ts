@@ -229,6 +229,25 @@ router.post("/run-niche-scan", async (req, res, next) => {
     const spawnedRuns = [];
     const timestamp = Date.now();
 
+    // Clean up any zombie/stale jobs for these usernames before starting fresh
+    for (const username of cleanedUsernames) {
+      const zombieJobId = `run-${username}`;
+      try {
+        // Try to remove any waiting/delayed job with a matching prefix
+        const existingJob = await influencerDiscoveryQueue.getJob(zombieJobId);
+        if (existingJob) {
+          const state = await existingJob.getState();
+          if (state === "active" || state === "waiting" || state === "delayed") {
+            await existingJob.remove();
+            console.log(`[Cleanup] Removed stale ${state} job ${zombieJobId}`);
+          }
+        }
+      } catch (cleanupErr) {
+        // Non-fatal — best effort cleanup
+        console.warn(`[Cleanup] Could not remove stale job for ${username}:`, cleanupErr);
+      }
+    }
+
     for (const username of cleanedUsernames) {
       // Upsert into SeedInfluencer to register this influencer under the niche
       await SeedInfluencer.findOneAndUpdate(
@@ -263,7 +282,11 @@ router.post("/run-niche-scan", async (req, res, next) => {
           niche: cleanNiche,
           sessionId
         },
-        { jobId: sessionId }
+        {
+          jobId: sessionId,
+          removeOnComplete: { count: 5 },  // keep only last 5 completed
+          removeOnFail: { count: 10 },     // keep last 10 failed for debugging
+        }
       );
 
       spawnedRuns.push({

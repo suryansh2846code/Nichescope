@@ -16,6 +16,7 @@ export interface DiscoverySessionAttrs {
     postsScraped: number;
     commentsExtracted: number;
     commentsAnalyzed: number;
+    commentsFailed: number;
     commentsQualified: number;
     leadsCreated: number;
   };
@@ -70,6 +71,7 @@ const discoverySessionSchema = new Schema(
       postsScraped: { type: Number, default: 0 },
       commentsExtracted: { type: Number, default: 0 },
       commentsAnalyzed: { type: Number, default: 0 },
+      commentsFailed: { type: Number, default: 0 },
       commentsQualified: { type: Number, default: 0 },
       leadsCreated: { type: Number, default: 0 },
     },

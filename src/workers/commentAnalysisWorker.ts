@@ -53,6 +53,7 @@ const worker = new Worker<CommentAnalysisJobData>(
           category: result.category,
           intent: result.intent,
           analyzedAt: new Date(),
+          ...(sessionId ? { sessionId } : {}),
         },
         { upsert: true, returnDocument: "after" }
       );
@@ -127,17 +128,14 @@ const worker = new Worker<CommentAnalysisJobData>(
       );
       if (sessionId) {
         try {
-          await discoveryEmitter.emit(sessionId, "comment_analyzed", {
+          await discoveryEmitter.emit(sessionId, "comment_error", {
             username: normalizedUser,
             comment: commentText,
-            isLead: false,
-            category: "general",
-            intent: "other",
-            confidence: 0,
+            reason: err instanceof Error ? err.message : String(err),
             timestamp: new Date()
           });
         } catch (emitErr) {
-          console.error("Failed to emit comment_analyzed fallback on error:", emitErr);
+          console.error("Failed to emit comment_error on analysis failure:", emitErr);
         }
       }
       throw err;

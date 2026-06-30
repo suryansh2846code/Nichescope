@@ -10,6 +10,7 @@ export interface CommentAnalysisAttrs {
   analyzedAt: Date;
   category?: string;
   intent?: string;
+  sessionId?: string;
 }
 
 const commentAnalysisSchema = new Schema(
@@ -57,6 +58,10 @@ const commentAnalysisSchema = new Schema(
     analyzedAt: {
       type: Date,
       default: Date.now,
+    },
+    sessionId: {
+      type: String,
+      index: true,
     },
   },
   {

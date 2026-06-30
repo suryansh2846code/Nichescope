@@ -57,6 +57,11 @@ export function getAIProvider(): AIProvider {
     return new OpenAIProvider(openrouterKey, "https://openrouter.ai/api/v1/chat/completions", "meta-llama/llama-3-8b-instruct");
   }
 
+  const groqKey = process.env.GROQ_API_KEY || "";
+  if (provider.toLowerCase() === "groq" && groqKey) {
+    return new OpenAIProvider(groqKey, "https://api.groq.com/openai/v1/chat/completions", "llama-3.1-8b-instant");
+  }
+
   throw new Error(
     "AI provider is not configured. Please set AI_PROVIDER='gemini' and GEMINI_API_KEY in your .env file."
   );

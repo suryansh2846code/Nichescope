@@ -10,6 +10,7 @@ import {
 import { scrapeComments } from "../scraper/instagram";
 import { setupWorkerLogger } from "../utils/logger";
 import { getSystemSettings } from "../models/SystemSettings";
+import { CommentAnalysis } from "../models/CommentAnalysis";
 import { discoveryEmitter, checkDiscoverySessionState } from "../services/discovery/discoveryEventEmitter";
 
 // Setup logging interceptor
@@ -33,15 +34,33 @@ const worker = new Worker<CommentScrapeJobData>(
     const shouldProceed = await checkDiscoverySessionState(sessionId);
     if (!shouldProceed) return;
 
+    const settings = await getSystemSettings();
+
+    // --- Session lead gate ---
+    // If this session already has enough confirmed leads, skip scraping this post.
+    if (sessionId) {
+      const leadsFound = await CommentAnalysis.countDocuments({ sessionId, isLead: true });
+      if (leadsFound >= settings.minLeadsRequired) {
+        console.log(`[LeadGate] Session ${sessionId} already has ${leadsFound}/${settings.minLeadsRequired} leads. Skipping post ${postUrl}.`);
+        await discoveryEmitter.emit(sessionId, "comments_extracted", {
+          postId: (postUrl.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/)?.[1]) ?? "unknown",
+          postUrl,
+          commentCount: 0,
+          newComments: [],
+        });
+        return { postUrl, skipped: true, reason: "min_leads_reached", leadsFound };
+      }
+      console.log(`[LeadGate] Session ${sessionId}: ${leadsFound}/${settings.minLeadsRequired} leads so far — continuing scrape.`);
+    }
+
     console.log(`Starting comment scrape job ${job.id} for post: ${postUrl}`);
 
     const match = postUrl.match(/\/(?:p|reel)\/([A-Za-z0-9_-]+)/);
     const postId = match ? match[1] : "unknown-post";
 
     try {
-      const settings = await getSystemSettings();
-      // Scrape comments for the post
-      let comments = await scrapeComments(postUrl);
+      // Scrape comments for the post using the configured timer
+      let comments = await scrapeComments(postUrl, { timeoutMs: settings.commentScrapeTimeoutMs });
       comments = comments.slice(0, settings.maxCommentsScraped);
       console.log(`Scraped ${comments.length} comments (limited by setting) for post ${postId}`);
 
@@ -115,7 +134,10 @@ const worker = new Worker<CommentScrapeJobData>(
   },
   {
     connection: createRedisConnectionOptions(),
-    concurrency: 2, // Allow scraping 2 posts concurrently
+    concurrency: 2,
+    lockDuration: 3 * 60 * 1000,    // 3 minutes — covers 2-minute scrape timeout + buffer
+    stalledInterval: 2 * 60 * 1000,
+    maxStalledCount: 1,
   }
 );
 

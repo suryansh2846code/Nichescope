@@ -366,6 +366,11 @@ const worker = new Worker<InfluencerDiscoveryJobData>(
   {
     connection: createRedisConnectionOptions(),
     concurrency: 1,
+    // Playwright scrapes take 60-180s. Default lockDuration is 30s which causes
+    // "could not renew lock" spam and zombie jobs. Set to 5 minutes.
+    lockDuration: 5 * 60 * 1000,       // 5 minutes
+    stalledInterval: 4 * 60 * 1000,    // check for stalled jobs every 4 min
+    maxStalledCount: 1,                 // fail a stalled job after 1 attempt (don't retry forever)
   }
 );
 
@@ -375,6 +380,10 @@ worker.on("completed", (job) => {
 
 worker.on("failed", (job, error) => {
   console.error(`Influencer discovery job ${job?.id ?? "unknown"} failed: ${error.message}`);
+});
+
+worker.on("stalled", (jobId) => {
+  console.warn(`[WARN] Influencer discovery job ${jobId} stalled (took too long) — it will be retried or failed.`);
 });
 
 console.log(`Influencer discovery worker listening on "${INFLUENCER_DISCOVERY_QUEUE_NAME}" queue`);

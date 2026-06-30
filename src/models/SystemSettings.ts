@@ -13,6 +13,8 @@ export interface SystemSettingsAttrs {
   openaiApiKey: string;
   openrouterApiKey: string;
   temperature: number;
+  minLeadsRequired: number;
+  commentScrapeTimeoutMs: number;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -35,7 +37,7 @@ const systemSettingsSchema = new Schema(
     },
     maxCommentsScraped: {
       type: Number,
-      default: 20,
+      default: 100,
     },
     followingBoostWeight: {
       type: Number,
@@ -68,6 +70,14 @@ const systemSettingsSchema = new Schema(
     temperature: {
       type: Number,
       default: 0.2,
+    },
+    minLeadsRequired: {
+      type: Number,
+      default: 10,
+    },
+    commentScrapeTimeoutMs: {
+      type: Number,
+      default: 120000,
     },
   },
   {

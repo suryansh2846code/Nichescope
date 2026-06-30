@@ -923,6 +923,94 @@ export async function scrapeHashtag(
   }
 }
 
+// Noise texts that appear as UI controls or footers — not real comment text
+const COMMENT_NOISE_TEXTS = [
+  "•follow", "follow", "•unfollow", "unfollow",
+  "edited", "like", "reply", "likereply",
+  "see translation", "view replies", "hide replies",
+  "see more posts", "carousel", "meta", "instagram",
+  "view all comments", "load more comments",
+  "more options", "clip", "video", "audio",
+  "share", "save", "report", "block", "not interested",
+  "turn on post notifications", "go to post", "copy link",
+];
+
+const COMMENT_SYSTEM_PATHS = new Set([
+  "explore", "reels", "direct", "stories", "emails",
+  "developer", "about", "blog", "jobs", "help", "api",
+  "privacy", "terms", "locations", "instagram", "popular",
+]);
+
+// Extracts all currently-visible comments from the DOM.
+// Kept as a standalone evaluatable string so it can be called repeatedly in the timer loop.
+async function extractVisibleComments(
+  page: Page,
+  seen: Set<string>
+): Promise<{ username: string; text: string }[]> {
+  const fresh = await page.evaluate(
+    ({ noiseTexts, systemPaths }: { noiseTexts: string[]; systemPaths: string[] }) => {
+      const noiseSet = new Set(noiseTexts);
+      const sysSet = new Set(systemPaths);
+      const results: { username: string; text: string }[] = [];
+      const localSeen = new Set<string>();
+
+      const anchors = Array.from(document.querySelectorAll('a[href]'));
+      for (const a of anchors) {
+        const href = (a as HTMLAnchorElement).getAttribute('href') || '';
+        const match = href.match(/^\/([a-zA-Z0-9_.-]+)\/$/);
+        if (!match) continue;
+
+        const username = (match[1] || '').toLowerCase().trim();
+        if (sysSet.has(username)) continue;
+
+        let parent = (a as HTMLElement).parentElement;
+        let commentText = '';
+        let found = false;
+
+        for (let depth = 0; depth < 6 && parent; depth++) {
+          const candidates = Array.from(parent.querySelectorAll('span, div'));
+          for (const cand of candidates) {
+            if (cand.contains(a)) continue;
+            if (cand.querySelector('a')) continue;
+            const text = (cand.textContent || '').trim();
+            if (!text || text.length < 2) continue;
+            if (noiseSet.has(text.toLowerCase())) continue;
+            if (/^\d+[smhdw]$/.test(text)) continue;
+            if (text.toLowerCase() === username) continue;
+            if (/^[a-zA-Z0-9_.-]+$/.test(text) && text.length <= 30 && !text.includes(' ')) continue;
+            commentText = text;
+            found = true;
+            break;
+          }
+          if (found) break;
+          parent = parent.parentElement;
+        }
+
+        if (found && commentText) {
+          const key = `${username}:${commentText}`;
+          if (!localSeen.has(key)) {
+            localSeen.add(key);
+            results.push({ username, text: commentText });
+          }
+        }
+      }
+      return results;
+    },
+    { noiseTexts: COMMENT_NOISE_TEXTS, systemPaths: Array.from(COMMENT_SYSTEM_PATHS) }
+  );
+
+  // Return only comments not seen in previous batches
+  const newComments: { username: string; text: string }[] = [];
+  for (const c of fresh) {
+    const key = `${c.username}:${c.text}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      newComments.push(c);
+    }
+  }
+  return newComments;
+}
+
 export async function scrapeComments(
   postUrl: string,
   options: { headless?: boolean; timeoutMs?: number } = {}
@@ -939,6 +1027,10 @@ export async function scrapeComments(
       { username: "test_commenter_3", text: "Is there any gym recommendation for real estate brokers?" },
     ];
   }
+
+  const SCRAPE_TIMEOUT_MS = options.timeoutMs ?? 120_000; // 2 minutes default
+  const deadline = Date.now() + SCRAPE_TIMEOUT_MS;
+  const remaining = () => Math.max(0, deadline - Date.now());
 
   const browser = await chromium.launch({
     headless: options.headless ?? true,
@@ -977,97 +1069,78 @@ export async function scrapeComments(
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
     });
 
-    console.log(`Navigating to post page to scrape comments: ${postUrl}`);
+    console.log(`[scrapeComments] Navigating to ${postUrl} (budget: ${Math.round(SCRAPE_TIMEOUT_MS / 1000)}s)`);
     await page.goto(postUrl, {
       waitUntil: "domcontentloaded",
-      timeout: options.timeoutMs ?? 30_000,
+      timeout: Math.min(30_000, remaining()),
     });
 
-    // Wait for the page to render enough for comments
-    await page.waitForTimeout(3000);
+    // Initial render wait
+    await page.waitForTimeout(Math.min(3000, remaining()));
 
-    // Scroll to load a few more comments
-    for (let i = 0; i < 2; i++) {
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      await page.waitForTimeout(1000);
+    const seen = new Set<string>();
+    const allComments: { username: string; text: string }[] = [];
+    let round = 0;
+    let emptyRounds = 0;
+
+    while (remaining() > 4000) {
+      round++;
+      const roundStart = Date.now();
+
+      // Extract whatever's visible now
+      const batch = await extractVisibleComments(page, seen);
+      if (batch.length > 0) {
+        allComments.push(...batch);
+        emptyRounds = 0;
+        console.log(`[scrapeComments] Round ${round}: +${batch.length} new comments (total: ${allComments.length}, remaining: ${Math.round(remaining() / 1000)}s)`);
+      } else {
+        emptyRounds++;
+        console.log(`[scrapeComments] Round ${round}: no new comments (empty round ${emptyRounds}, total: ${allComments.length})`);
+      }
+
+      // If 3 consecutive rounds produce nothing, the page is exhausted
+      if (emptyRounds >= 3) {
+        console.log(`[scrapeComments] 3 consecutive empty rounds — post comments exhausted`);
+        break;
+      }
+
+      if (remaining() < 4000) break;
+
+      // Try clicking "Load more comments" button first (highest yield)
+      let clickedLoadMore = false;
+      try {
+        const loadMoreBtn = page.locator([
+          'button:has-text("Load more comments")',
+          'button:has-text("View more comments")',
+          'button:has-text("load more comments")',
+          'span:has-text("Load more comments")',
+        ].join(', '));
+
+        if (await loadMoreBtn.count() > 0) {
+          await loadMoreBtn.first().click({ timeout: 3000 });
+          await page.waitForTimeout(Math.min(2000, remaining() - 2000));
+          clickedLoadMore = true;
+          console.log(`[scrapeComments] Clicked "Load more comments"`);
+        }
+      } catch {
+        // button not found or not clickable — fall through to scroll
+      }
+
+      // If no "Load more" button, scroll down to trigger lazy-load
+      if (!clickedLoadMore && remaining() > 4000) {
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await page.waitForTimeout(Math.min(1500, remaining() - 2000));
+      }
+
+      // Pace: never spin faster than 1s per round
+      const elapsed = Date.now() - roundStart;
+      if (elapsed < 1000 && remaining() > 3000) {
+        await page.waitForTimeout(1000 - elapsed);
+      }
     }
 
-    // Noise texts that appear as UI controls or footers — not real comment text
-    const NOISE_TEXTS = [
-      "•follow", "follow", "•unfollow", "unfollow",
-      "edited", "like", "reply", "likereply",
-      "see translation", "view replies", "hide replies",
-      "see more posts", "carousel", "meta", "instagram",
-      "view all comments", "load more comments",
-      "more options", "clip", "video", "audio",
-      "share", "save", "report", "block", "not interested",
-      "turn on post notifications", "go to post", "copy link",
-    ];
-
-    // Extract comments by traversing from username anchor links.
-    // Instagram's modern DOM (2025) no longer renders comments inside <ul><li> elements.
-    // Instead each comment block has an anchor pointing to '/username/' from which
-    // we can discover the commenter, then look for sibling spans containing the text.
-    const comments = await page.evaluate((noiseTexts: string[]) => {
-      const noiseSet = new Set(noiseTexts);
-      const results: { username: string; text: string }[] = [];
-      const seen = new Set<string>();
-
-      const SYSTEM_PATHS = new Set([
-        "explore", "reels", "direct", "stories", "emails",
-        "developer", "about", "blog", "jobs", "help", "api",
-        "privacy", "terms", "locations", "instagram", "popular",
-      ]);
-
-      const anchors = Array.from(document.querySelectorAll('a[href]'));
-      for (const a of anchors) {
-        const href = (a as HTMLAnchorElement).getAttribute('href') || '';
-        const match = href.match(/^\/([a-zA-Z0-9_.-]+)\/$/); 
-        if (!match) continue;
-
-        const username = (match[1] || "").toLowerCase().trim();
-        if (SYSTEM_PATHS.has(username)) continue;
-
-        // Traverse parent elements to find a sibling span with comment text
-        let parent = (a as HTMLElement).parentElement;
-        let commentText = '';
-        let found = false;
-
-        for (let depth = 0; depth < 6 && parent; depth++) {
-          const candidates = Array.from(parent.querySelectorAll('span, div'));
-          for (const cand of candidates) {
-            if (cand.contains(a)) continue;   // skip ancestors of anchor
-            if (cand.querySelector('a')) continue;  // skip containers with other links
-
-            const text = (cand.textContent || '').trim();
-            if (!text || text.length < 2) continue;
-            if (noiseSet.has(text.toLowerCase())) continue;
-            if (/^\d+[smhdw]$/.test(text)) continue; // skip timestamps
-            if (text.toLowerCase() === username) continue;
-            // Skip bare username-like strings (reply-to mentions shown in thread context)
-            if (/^[a-zA-Z0-9_.-]+$/.test(text) && text.length <= 30 && !text.includes(' ')) continue;
-
-            commentText = text;
-            found = true;
-            break;
-          }
-          if (found) break;
-          parent = parent.parentElement;
-        }
-
-        if (found && commentText) {
-          const key = `${username}:${commentText}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            results.push({ username, text: commentText });
-          }
-        }
-      }
-      return results;
-    }, NOISE_TEXTS);
-
-    console.log(`Successfully scraped ${comments.length} comments from ${postUrl}`);
-    return comments;
+    console.log(`[scrapeComments] Done. Collected ${allComments.length} comments from ${postUrl}`);
+    return allComments;
   } finally {
     await safeClose(browser, "browser", 2000);
   }

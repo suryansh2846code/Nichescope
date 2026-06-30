@@ -53,6 +53,8 @@ class DiscoveryEventEmitter {
         if (data.isLead) {
           updateQuery.$inc["stats.commentsQualified"] = 1;
         }
+      } else if (type === "comment_error") {
+        updateQuery.$inc = { "stats.commentsFailed": 1 };
       } else if (type === "lead_created") {
         updateQuery.$inc = { "stats.leadsCreated": 1 };
       } else if (type === "completed" || type === "stage_complete") {
@@ -78,9 +80,10 @@ class DiscoveryEventEmitter {
       // 2. Check for auto-completion (if all posts scraped and comments analyzed)
       if (session && session.status === "running") {
         const s = session.stats;
+        const processedComments = s.commentsAnalyzed + (s.commentsFailed ?? 0);
         if (
           s.postsScraped >= s.postsFound &&
-          s.commentsAnalyzed >= s.commentsExtracted &&
+          processedComments >= s.commentsExtracted &&
           s.postsFound > 0
         ) {
           session.status = "completed";

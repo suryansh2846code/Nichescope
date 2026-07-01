@@ -1,0 +1,831 @@
+================================================================================
+NICHESCOPE — COMPLETE PROJECT STORY
+Everything I built, every choice I made, every problem I hit, every fix I found
+================================================================================
+
+Written by: Suryansh Singh
+Role: 3rd Year CS Student
+Duration: Built across multiple sessions
+GitHub: https://github.com/suryansh2846code/Nichescope
+
+--------------------------------------------------------------------------------
+SECTION 1: THE IDEA
+--------------------------------------------------------------------------------
+
+The goal was to build an automated lead generation tool for Instagram.
+
+The concept: businesses that sell to a specific niche (fitness, skincare,
+coding education, etc.) want to find potential customers. The best place to
+find them is in the comment sections of relevant influencer posts — because
+people who comment things like "where can I buy this?", "who's your trainer?",
+"which app do you use?" are actively expressing buying intent in public.
+
+The problem is doing this manually is impossible at scale. A single influencer
+post can have 500+ comments. Checking 5 posts per influencer, 5 influencers,
+that's 2500+ comments to read by hand — most of which are irrelevant.
+
+NicheScope automates this:
+1. Give it seed influencers for your niche
+2. It scrapes their recent posts
+3. Reads every comment using AI
+4. Saves the people who show buying intent as leads
+5. Shows you their Instagram profile, bio, follower count
+
+--------------------------------------------------------------------------------
+SECTION 2: TECHNOLOGY CHOICES
+--------------------------------------------------------------------------------
+
+Every technology was chosen deliberately. Here is why each one was picked.
+
+RUNTIME: Bun (not Node.js)
+---
+I used Bun instead of Node.js for the entire project. Bun is faster to start,
+has built-in TypeScript support without needing ts-node or tsc, automatically
+loads .env files without dotenv, and has a built-in test runner and bundler.
+It also supports running .ts files directly with `bun run file.ts`.
+
+LANGUAGE: TypeScript
+---
+TypeScript was chosen for type safety across the whole project. With MongoDB
+models, queue job data, and API responses all flowing through the system,
+type errors at compile time prevent whole categories of bugs that would
+otherwise only show up at runtime.
+
+API SERVER: Express 5
+---
+Express 5 for the REST API. It's the most widely known Node.js web framework
+and Express 5 has better async error handling than Express 4.
+
+FRONTEND: React 19 + Bun Bundler
+---
+React 19 for the UI. No Vite, no webpack — Bun bundles .tsx files directly.
+You write a .html file, point a script tag at a .tsx file, and Bun handles
+all the transpilation and bundling automatically. This massively simplified
+the frontend setup.
+
+DATABASE: MongoDB (via Mongoose)
+---
+MongoDB for all persistent data. The schema-flexibility is useful because
+the "shape" of a lead evolved over time — first it just had username and bio,
+then it got follower counts, then following lists, then AI scores, then
+CRM pipeline fields. With a SQL database, each of these additions would
+require a migration. With MongoDB they're just new fields.
+
+JOB QUEUE: BullMQ
+---
+BullMQ is a Redis-backed job queue library. This is the most important
+architectural choice in the project.
+
+The reason for a job queue: each stage of the pipeline (scrape influencer →
+scrape comments → analyze comments → scrape profile) takes anywhere from
+5 seconds to 3 minutes. If you did all of this synchronously inside an HTTP
+request, the request would time out. And if one step fails, you lose
+everything.
+
+With BullMQ:
+- Each unit of work is a "job" stored in Redis
+- Workers pick up jobs and process them independently
+- If a worker crashes, the job is automatically retried
+- You can control concurrency (how many jobs run in parallel)
+- Failed jobs are preserved so you can inspect what went wrong
+- Jobs are not lost if the server restarts
+
+QUEUE BROKER: Redis
+---
+BullMQ requires Redis as its backing store. Redis is also used for
+the real-time event system (Pub/Sub). So Redis is doing double duty:
+storing job state for BullMQ AND routing real-time events from workers
+to the WebSocket server.
+
+REAL-TIME: WebSocket + Redis Pub/Sub
+---
+The dashboard needs to show live progress: "Post 1/5 scraped",
+"47 comments found", "3 leads so far". This requires pushing events from
+the workers to the browser.
+
+The architecture:
+- Workers call discoveryEmitter.emit(sessionId, type, data)
+- The emitter writes the event to MongoDB (persistent record)
+- The emitter publishes the event to a Redis Pub/Sub channel
+- A WebSocket server subscribes to that Redis channel
+- When it receives a message, it forwards it to the connected browser
+
+This design means workers never talk to WebSocket clients directly.
+Workers only talk to Redis. The WebSocket server only talks to Redis.
+They're decoupled.
+
+SCRAPER: Playwright (Chromium, stealth mode)
+---
+Instagram has no public API. It was shut down in 2018. The only way to
+read Instagram data programmatically is to drive a real browser.
+
+Playwright is a browser automation library by Microsoft. It controls
+a real Chromium browser, navigates to Instagram pages, waits for JavaScript
+to load the content, and extracts text from the DOM.
+
+"Stealth mode" means configuring Playwright to look less like automation:
+disabling the AutomationControlled browser flag, using a real desktop
+user agent string, setting a normal viewport size. Instagram's bot detection
+looks for these signals.
+
+Cookie injection: instead of logging in fresh every time (which triggers
+2FA and suspicious login alerts), the browser session from a real login
+is saved as cookies. Before each scrape session, those cookies are loaded
+into Playwright's browser context. Instagram sees a logged-in session.
+
+AI: Groq (with Gemini / OpenAI / OpenRouter support)
+---
+The AI layer is abstracted behind an AIProvider interface so the underlying
+model can be swapped without changing any worker code.
+
+During development several providers were tried:
+- Gemini (google) — good quality, had rate limit issues (429 errors)
+- OpenRouter — acts as a proxy to many models, ran out of credits (402 error)
+- OpenAI — best quality, costs money per request
+- Groq — free tier, llama-3.1-8b-instant model, very fast
+
+Final choice for development: Groq (free, fast, no credit issues).
+
+--------------------------------------------------------------------------------
+SECTION 3: PHASES OF DEVELOPMENT
+--------------------------------------------------------------------------------
+
+The project was built in phases, adding capability incrementally.
+
+PHASE 1-2: Foundation
+---
+- Set up the project with Bun, Express, MongoDB
+- Created the Lead model (username, bio, followerCount, profileUrl, niche)
+- Basic CRUD API: POST /leads, GET /leads
+- Tested with curl commands manually
+
+PHASE 3: Instagram Scraper
+---
+- Built instagram.ts with Playwright
+- scrapeProfile() function: opens a profile, extracts bio/followers, collects posts
+- First working scrape of a real Instagram profile
+- Command: `bun run scrape:profile username`
+
+PHASE 4: Job Queue
+---
+- Introduced BullMQ and Redis
+- scrapeQueue + scrapeWorker
+- HTTP endpoint that enqueues a job instead of scraping inline
+- Job status polling via GET /jobs/:id
+- First time the "background worker" pattern was used
+
+PHASE 5: Database Integration
+---
+- Connected the scraper to MongoDB properly
+- Duplicate checking: don't save the same lead twice
+- saveOrUpdateScrapedProfile() helper function
+- Posts model: save scraped posts to database
+
+PHASE 6: React Frontend Dashboard
+---
+- Built the React frontend served by Bun's bundler
+- Dashboard showing leads, job statuses, queue metrics
+- Real-time job progress updates via polling
+
+PHASE 7: Lead Monitoring & Change Detection
+---
+- monitoringWorker: periodically re-scrapes known leads to detect changes
+- LeadScoreHistory: track how a lead's score changes over time
+- Automated alerts when a lead's engagement changes significantly
+
+PHASE 8: Market Intelligence & Trend Discovery
+---
+- hashtagDiscoveryWorker: scrape posts by hashtag to find new leads
+- Trend analysis: which content topics are growing in a niche
+- This phase was later removed/simplified to focus on influencer comments
+
+PHASE 9: AI Lead Qualification + CRM
+---
+- leadQualificationWorker: deep AI analysis of qualified leads
+- LeadQualification model: problem, serviceNeeded, urgency, buyingIntent score
+- CRM pipeline: Kanban board with drag-and-drop (New → Contacted → Replied → Converted)
+- Lead inbox with filtering, sorting, export to CSV/JSON
+- LeadActivity model: audit log of every action taken on a lead
+
+PHASE 10: User Intelligence + Embeddings
+---
+- userIntelligenceWorker: aggregates all signals for a person into one summary
+- EmbeddingProvider: compute vector embeddings for semantic search
+- Search service: find leads by meaning, not just keyword match
+
+PHASE 11: Seed Influencer Pipeline (the main current system)
+---
+- New concept: "seed influencers" — specific accounts whose comments to mine
+- influencerDiscoveryWorker: given an influencer's username, collect recent posts
+- commentScrapeWorker: given a post URL, scrape all comments
+- commentAnalysisWorker: classify each comment with AI
+- DiscoverySession: real-time tracking of a scan's progress
+- WebSocket streaming of progress to the UI
+- Pause/resume/cancel scan controls
+- Real-time dashboard with per-influencer stats
+
+PHASE 12: Debugging and Bug Fixes (final session)
+---
+Multiple critical bugs were found and fixed. These are documented in
+full detail in Section 5.
+
+--------------------------------------------------------------------------------
+SECTION 4: ARCHITECTURE DECISIONS EXPLAINED
+--------------------------------------------------------------------------------
+
+WHY SEPARATE WORKERS FOR EACH STAGE?
+---
+The pipeline has 4 stages: discover posts → scrape comments → analyze comments
+→ scrape profile. Each of these could be done sequentially in a single function.
+But they were separated into individual workers for these reasons:
+
+1. Independent failure: if comment analysis fails (e.g. AI API is down), the
+   comment scraping jobs are already saved in Redis and can be retried later
+   without re-scraping.
+
+2. Independent scaling: comment analysis is fast (just an API call). Comment
+   scraping is slow (Playwright browser). You can run 4 analysis workers
+   and 2 scrape workers concurrently without them interfering.
+
+3. Visibility: each queue can be inspected independently. You can see
+   "200 jobs waiting in comment-analysis queue" and know exactly where
+   the bottleneck is.
+
+4. Pause/resume: because jobs are in Redis, you can drain a queue, pause
+   processing, and resume later without losing any work.
+
+WHY BULLMQ JOB IDs?
+---
+BullMQ uses job IDs for deduplication. If you try to add a job with an ID
+that already exists (in waiting, active, or completed state), BullMQ silently
+drops it. This is a feature — it prevents the same post from being scraped
+twice in one session.
+
+But the job ID strategy matters enormously. Original IDs were:
+  comments-<postId>  e.g. comments-DW3yJ6hCM3R
+
+This caused a bug: BullMQ retains completed jobs for 24 hours. If you run
+two scans in the same day for the same influencers, the second scan's jobs
+get silently dropped because the completed job IDs still exist.
+
+Fixed to: comments-<postId>-<sessionId>
+
+Now each scan has unique job IDs. The same post can be scraped in multiple
+sessions. But within one session, the same post can't be duplicated.
+
+WHY SAVE LEADS IMMEDIATELY?
+---
+Original design: when AI says a comment is from a lead, enqueue a Playwright
+scrape of their profile, and save the Lead record only after the scrape succeeds.
+
+This caused 97% lead loss. BullMQ has a 90-second timeout on the scrape queue.
+A full profile scrape (profile page + following list + posts) takes 90-180 seconds.
+BullMQ kills the job at the queue level — the worker's catch block doesn't run.
+No Lead record is ever created. The lead is gone.
+
+Fixed: when AI says isLead=true, immediately create a Lead record with a
+placeholder (username, niche, profileUrl). Then enqueue the scrape to enrich it
+with real data. The lead is saved no matter what happens to the scrape.
+
+WHY REDIS PUB/SUB FOR REAL-TIME?
+---
+Workers run in separate processes (spawned by run-all.ts). The WebSocket server
+runs in the main API process. A worker can't directly call the WebSocket server
+because they're in different processes.
+
+Redis Pub/Sub solves this cleanly. A worker publishes to a channel:
+  PUBLISH discovery:<sessionId> <JSON>
+
+The WebSocket server subscribes to that channel and forwards any message to
+the browser. Workers don't know or care about WebSocket. The WebSocket server
+doesn't know or care about workers. Redis is the bridge.
+
+WHY THE EVENT EMITTER ALSO WRITES TO MONGODB?
+---
+The Redis Pub/Sub message is gone once it's delivered. If a browser connects
+to a session that's already 50% complete, it would only see events from that
+point forward — it would miss the first half.
+
+So every event is also written to the DiscoverySession.events array in MongoDB.
+When a browser connects mid-session, it first fetches the session document
+to get all historical events, then subscribes to Redis for future events.
+
+WHY GROQ OVER GEMINI?
+---
+Gemini was the first AI provider used. It works well but had 429 (rate limit)
+errors during development when sending many concurrent requests.
+
+OpenRouter was tried next. It's a proxy that routes requests to many models.
+But the account had no credits, causing 402 errors on every request.
+
+Groq has a generous free tier (14,400 requests/minute on llama-3.1-8b-instant).
+For development and testing, it's essentially unlimited. The llama-3.1-8b model
+is fast and accurate enough for comment classification.
+
+The AIProvider interface means switching back to Gemini or OpenAI for production
+is a one-line change in .env.
+
+--------------------------------------------------------------------------------
+SECTION 5: EVERY BUG AND EVERY FIX
+--------------------------------------------------------------------------------
+
+This section documents every significant bug encountered during development,
+in chronological order, with the full diagnosis and fix.
+
+=== BUG 1: Port conflicts when restarting ===
+
+SYMPTOM: After killing the servers and restarting, the API fails to start
+with "EADDRINUSE: address already in use :::3001".
+
+ROOT CAUSE: Running `bun run dev:all` spawns multiple processes. Killing the
+parent process (Ctrl+C) doesn't always kill all child processes, especially
+Playwright browser instances. The old process still holds the port.
+
+FIX: Before restarting, explicitly kill all worker processes:
+  pkill -f "run-all.ts"
+  pkill -f "influencerDiscoveryWorker"
+  pkill -f "commentScrapeWorker"
+  etc.
+
+LESSON: When you spawn child processes, you need to track and kill them
+explicitly. The parent dying doesn't always cascade to children.
+
+=== BUG 2: Instagram scraper finding 0 posts ===
+
+SYMPTOM: influencerDiscoveryWorker logs "Discovered 0 post URLs for @username"
+even for active public accounts.
+
+ROOT CAUSE: The post URL regex was too loose:
+  /\/(p|reel|reels)\//
+
+Instagram's navigation bar contains links like <a href="/reel/"> with no
+post ID. These matched the regex. The "post URLs" collected were things like
+"https://www.instagram.com/reel" with no post ID.
+
+When getPostId() tried to extract a post ID from these, it returned the full
+URL as the ID. When BullMQ tried to use this as a job ID, it threw:
+  "Custom Id cannot contain ':'"
+
+...because the URL contained colons (https://). All jobs were rejected.
+
+FIX: Changed the regex to require a post ID after the slash:
+  /\/(p|reel|reels)\/[A-Za-z0-9_-]+/
+
+Now only URLs with an actual post ID (like /p/DW3yJ6hCM3R) match.
+
+LESSON: Regex that's "close enough" can pass your tests but silently corrupt
+downstream systems. Always validate that extracted data actually makes sense
+before using it as a key or identifier.
+
+=== BUG 3: No Instagram cookies = 0 posts found ===
+
+SYMPTOM: Scan runs for 60+ seconds, finds 0 posts, then times out.
+
+ROOT CAUSE: Without cookies, Instagram shows the login page to the headless
+browser. The scraper was trying to find post grid elements on the login page,
+which of course don't exist. After a 60-second timeout, it gave up.
+
+This also meant the very first scans never worked at all, which made it
+very hard to debug the pipeline because there was nothing flowing through it.
+
+FIX: Created save-cookies.ts — a script that opens a visible (non-headless)
+Playwright browser, waits for the user to log in to Instagram manually, then
+saves all cookies to instagram_cookies.json.
+
+The main scraper then loads these cookies before every session:
+  await context.addCookies(JSON.parse(fs.readFileSync('instagram_cookies.json')))
+
+LESSON: Authentication is often the invisible prerequisite. When a scraper
+returns empty results, always ask "is it actually logged in?"
+
+=== BUG 4: AI provider returning 402 errors (OpenRouter no credits) ===
+
+SYMPTOM: All comment-analysis jobs failing. 359 failed jobs in the queue.
+0 leads saved despite posts and comments being scraped successfully.
+
+ROOT CAUSE: AI_PROVIDER was set to "openrouter" but the OpenRouter account had
+no credits. Every call to analyzeCaption() returned HTTP 402 with the error:
+  "Insufficient credits. This account never purchased credits."
+
+The failures happened silently. No alert in the UI. No loud log. The jobs
+just failed and moved to BullMQ's failed state. You had to manually inspect
+the failed queue to see what was happening.
+
+FIX: Added GROQ_API_KEY to .env and changed AI_PROVIDER=groq.
+Groq has a free tier generous enough for development use.
+
+LESSON: External API failures need to be visible. 402s from an AI provider
+are a business logic failure, not a transient error — they won't get better
+with retries. They should surface to the developer immediately.
+
+=== BUG 5: Failed AI jobs causing premature session completion ===
+
+SYMPTOM: Sessions complete after only a few seconds with 0 leads, 0 posts
+actually processed. Subsequent jobs immediately discard themselves.
+
+ROOT CAUSE: The auto-completion logic in discoveryEventEmitter was:
+  if (commentsAnalyzed >= commentsExtracted && postsScraped >= postsFound)
+    -> mark session as "completed"
+
+In the catch block of commentAnalysisWorker (when the AI call failed), the
+code was emitting "comment_analyzed" instead of "comment_error":
+  // BUG: wrong event type in catch block
+  await discoveryEmitter.emit(sessionId, "comment_analyzed", { ... })
+
+So every failed AI job was being counted as "analyzed". When OpenRouter
+returned 402 for every job, all 359 jobs "analyzed" immediately. The
+auto-completion check fired. Session was marked "completed".
+
+All other jobs in the queue (comment-scrape jobs waiting to run, more
+analysis jobs) called checkDiscoverySessionState() at their start, saw
+status = "completed", and returned immediately without doing any work.
+
+The session was dead but appeared complete.
+
+FIX 1: Changed the catch block to emit the correct event type:
+  await discoveryEmitter.emit(sessionId, "comment_error", { ... })
+
+FIX 2: Updated the auto-completion check to count failures:
+  const processedComments = s.commentsAnalyzed + (s.commentsFailed ?? 0)
+  if (processedComments >= s.commentsExtracted && postsScraped >= postsFound)
+
+Now failed jobs are counted as "processed" for the purposes of completion,
+but they're separately tracked in stats.commentsFailed.
+
+FIX 3: Added "commentsFailed" to the DiscoverySession stats schema.
+
+LESSON: Error paths must update state correctly. An incorrect event type
+in a catch block can corrupt the entire session state machine, causing
+all other workers to silently discard their jobs. In a distributed system,
+wrong state is often worse than no state.
+
+=== BUG 6: 115 leads flagged but only 3 saved ===
+
+SYMPTOM: After fixing the AI provider, leads were being detected (115 comments
+marked isLead=true in CommentAnalysis collection) but only 3 Lead documents
+existed in the leads collection.
+
+ROOT CAUSE: The flow was:
+  1. AI says isLead=true
+  2. Enqueue a scrapeQueue job to scrape the commenter's profile
+  3. scrapeWorker runs, scrapes the profile with Playwright
+  4. scrapeWorker calls saveOrUpdateScrapedProfile() to save the Lead
+
+The scrapeQueue had a 90-second BullMQ-level timeout. When BullMQ kills a
+job at timeout, the kill happens at the queue level — not by throwing an
+exception inside the worker. The worker's try/catch never runs. The code
+that creates the Lead record never executes.
+
+A Playwright profile scrape takes:
+- Load profile page: 10-20s
+- Extract profile data: 5s
+- scrapeFollowing() — loads following list: 30-60s
+- analyzeFollowingList(): 5s
+- saveOrUpdatePosts(): 10s
+Total: easily 90-180s
+
+With 5 concurrent scrape jobs, resource contention makes it even slower.
+Result: 97% of jobs hit the timeout. 97% of leads never got saved.
+
+The original code also had a catch block that created a "placeholder" lead
+on error:
+  handleScrapeCompletionOrSkip(username, niche, false, ...)
+
+But since BullMQ kills the job externally, this catch block never runs either.
+
+FIX: Save the Lead immediately in commentAnalysisWorker when AI detects a lead,
+BEFORE enqueueing the profile scrape:
+
+  // commentAnalysisWorker — when isLead=true:
+  await Lead.create({
+    username: normalizedUser,
+    fullName: "",
+    bio: "",
+    profileUrl: `https://www.instagram.com/${normalizedUser}/`,
+    niche,
+    foundVia: "comment-analysis",
+    rawData: { commentText, category, intent },
+  })
+
+  // THEN enqueue profile scrape (just for enrichment, lead already saved)
+  await scrapeQueue.add(SCRAPE_PROFILE_JOB_NAME, { username, niche, sessionId })
+
+Also emit "lead_created" event so the session stat increments and the UI shows it.
+
+LESSON: In distributed systems, never put critical business logic (saving a
+record) as a side effect of a cleanup/enrichment step. The cleanup step can
+be killed externally. Save the important thing immediately. Enrich it later.
+
+=== BUG 7: BullMQ deduplication silently blocked all re-scans ===
+
+SYMPTOM: After the first successful scan, every subsequent scan shows
+"Posts 0/5" for all influencers. No posts are ever scraped. Comments: 0.
+Leads: 0. But the scan stays "RUNNING" for minutes.
+
+ROOT CAUSE: Comment-scrape job IDs were: comments-<postId>
+
+BullMQ retains completed jobs in Redis for 24 hours (configured via
+removeOnComplete: { age: 86400 }). This is intentional — it prevents the
+same job from being re-processed accidentally.
+
+When a new scan starts and finds the same 5 posts for the same influencer,
+it tries to enqueue 5 comment-scrape jobs with the same IDs as the previous
+scan. BullMQ sees these IDs already exist in the completed set and silently
+drops them.
+
+No jobs get enqueued. No jobs get processed. The influencer discovery worker
+reports success (it enqueued... but BullMQ dropped them all). The session
+stats never update. Posts stay at 0/5.
+
+This was very hard to diagnose because BullMQ drops the duplicate silently —
+it doesn't return an error. It just doesn't add the job.
+
+The diagnosis was found by querying the queue:
+  const completed = await commentScrapeQ.getCompleted(0, 5)
+  // Found: completed jobs with IDs matching the current scan's posts
+  // Finished timestamps: 09:47:XX from a previous scan hours ago
+
+FIX: Include sessionId in the job ID:
+  const jobId = sessionId
+    ? `comments-${postId}-${sessionId}`
+    : `comments-${postId}`
+
+Now each scan gets unique job IDs. Re-scanning the same influencers in a
+new session creates fresh jobs that BullMQ doesn't recognize as duplicates.
+Within one session, the same post still deduplicates correctly.
+
+LESSON: Any static string used as a BullMQ job ID is a potential trap.
+If completed jobs are retained (the default), the same job can never run
+again within the retention window. Always scope job IDs to the context
+that requires uniqueness — usually the session or user.
+
+=== BUG 8: @kaushik___devansh always returns 0 posts ===
+
+SYMPTOM: This specific influencer account always results in 0 posts found,
+wasting 60 seconds per scan with a browser doing nothing.
+
+ROOT CAUSE: The account is either private, deleted, or name-changed. When
+Playwright opens the profile, either the login wall shows (already fixed
+by cookies) or the profile grid simply doesn't appear. After a 60-second
+timeout waiting for the post grid, the worker gives up with 0 posts.
+
+STATUS: Not fully fixed. The account should be replaced with a valid active
+influencer in the seed influencer list.
+
+WORKAROUND: Remove @kaushik___devansh from the seed influencers list.
+
+=== BUG 9: "already_scanned" status rejected by Mongoose ===
+
+SYMPTOM: When a scan detected that an influencer had already been scanned,
+the code emitted an "already_scanned" event which tried to set
+status = "already_scanned" on the DiscoverySession. No error was thrown,
+but the status update silently failed.
+
+ROOT CAUSE: The DiscoverySession schema had:
+  status: { enum: ["running", "paused", "cancelled", "completed", "failed"] }
+
+"already_scanned" was not in the enum. Mongoose silently ignores writes to
+fields that violate enum constraints when using findOneAndUpdate with $set.
+
+The event was emitted, the Redis Pub/Sub message was sent, the UI got the
+event — but the database document's status field stayed as "running".
+
+FIX: Added "already_scanned" to the enum in both the Mongoose schema and
+the TypeScript interface:
+  status: { enum: ["running", "paused", "cancelled", "completed", "failed", "already_scanned"] }
+
+LESSON: Mongoose's strict mode by default ignores unrecognized field values
+rather than throwing errors. Enum violations are especially silent. Always
+verify that database writes actually persisted the value you intended,
+especially for status/state fields.
+
+=== BUG 10: Playwright stdout pipe stalling ===
+
+SYMPTOM: When watching logs via `tail -f /tmp/nichescope.log`, the logs would
+freeze and stop updating after a certain point, even though the scan was still
+running.
+
+ROOT CAUSE: run-all.ts uses Bun.spawn() with stdout: "pipe". The stdout pipe
+has an internal buffer. When a Playwright worker is doing async I/O (waiting
+for Instagram to load), it produces no stdout. The pipe buffer fills with
+previous output and then stalls because the consumer (streamOutput function)
+is stuck awaiting the next chunk from the pipe.
+
+This is a known issue with piped stdout from long-running async processes:
+the pipe's flow control can cause the reader to block.
+
+FIX (workaround): Instead of relying on the log file for live status, query
+MongoDB directly to check actual pipeline progress:
+  db.discoveryessions.findOne({ sessionId: "..." })
+  db.leads.countDocuments({})
+  db.commentanalyses.countDocuments({ isLead: true })
+
+This gives ground truth about what's happening regardless of log pipe issues.
+
+A proper fix would be to write logs to a file directly within each worker
+rather than routing through the parent process pipe.
+
+LESSON: Piped stdout from child processes has complex buffering behavior.
+For observability of long-running processes, write directly to files or
+a database, not through parent process pipes.
+
+--------------------------------------------------------------------------------
+SECTION 6: THE FINAL DEBUGGING SESSION (full story)
+--------------------------------------------------------------------------------
+
+This section documents the final debugging session in detail — the one where
+most of the major bugs were discovered and fixed.
+
+THE STARTING POINT:
+The scan UI showed "RUNNING" for 5-10 minutes with 0 posts, 0 comments,
+0 leads. Something was fundamentally broken.
+
+STEP 1: Checked if servers were running
+Confirmed all workers started. influencerDiscoveryWorker was finding posts
+(5 for @namannncore, 5 for @_zaydankhan) based on the logs.
+
+STEP 2: Queried queue depths directly via code
+  comment-scrape: waiting=0 active=0 failed=1 completed=10
+  comment-analysis: failed=359 completed=66
+  scrape: failed=1 completed=40
+
+Key finding: 359 failed comment-analysis jobs. Something is wrong with AI.
+
+STEP 3: Inspected failed job error messages
+  job.failedReason: "LLM provider error (status 402): Insufficient credits"
+
+Cause found: OpenRouter has no credits. All AI calls failing.
+
+STEP 4: Switched to Groq
+Added GROQ_API_KEY to .env, changed AI_PROVIDER=groq. Restarted workers.
+
+STEP 5: Started a new scan. Still 0 posts scraped after 391 seconds.
+The influencer discovery was completing (logs showed "5 posts found, 5 jobs enqueued")
+but no comment scraping was happening.
+
+STEP 6: Queried queue depths again
+  comment-scrape: completed=10, active=0, waiting=0
+
+10 completed jobs but 0 posts scraped in the current session. These 10
+completed jobs must be from the previous scan.
+
+STEP 7: Inspected the completed job IDs and timestamps
+  Job ID: comments-DZ2mXprAIHI
+  Finished: 2026-06-30T09:47:41.481Z
+
+The job completed hours ago in a previous scan. The current scan is trying
+to enqueue the same job ID. BullMQ is silently dropping it.
+
+STEP 8: Fixed job IDs to include sessionId
+  Before: comments-DZ2mXprAIHI
+  After:  comments-DZ2mXprAIHI-run-_zaydankhan-1782823702596
+
+STEP 9: Also investigated lead loss (115 flagged vs 3 saved)
+Traced it to the scrape job timeout issue described in Bug 6.
+Fixed by saving leads immediately in commentAnalysisWorker.
+
+STEP 10: Restarted and tested
+New scan ran. Posts were found. Comment scrape jobs were processed (new IDs
+not in completed set). AI analysis ran with Groq. Leads were created immediately.
+
+--------------------------------------------------------------------------------
+SECTION 7: THE SYSTEM AS IT STANDS TODAY
+--------------------------------------------------------------------------------
+
+WHAT WORKS:
+- Seed influencer post discovery via Playwright
+- Comment scraping with timer-based scrolling (up to 120s per post)
+- AI comment classification with Groq (free, fast)
+- Immediate lead saving when AI detects buying intent
+- Profile enrichment in the background (scrapeWorker)
+- Real-time WebSocket dashboard showing live progress
+- Session-scoped BullMQ job IDs prevent cross-scan deduplication
+- Pause/resume/cancel scan controls
+- CRM pipeline (Kanban board) for managing leads
+- Lead qualification with deep AI scoring
+- Following list overlap scoring (boost for leads who follow seed influencers)
+- System settings editable from the UI
+- Multi-influencer parallel scanning
+
+WHAT STILL HAS LIMITATIONS:
+- Private Instagram accounts return 0 results (Playwright can't see them)
+- Instagram may throttle or block if scanned too aggressively
+- Session cookies expire and need to be refreshed periodically
+- @kaushik___devansh always returns 0 posts (private/deleted account)
+- Log pipeline stalls under heavy Playwright load (use MongoDB queries instead)
+- Comment scraping on very popular posts (10000+ comments) won't capture all comments
+
+WHAT COULD BE IMPROVED WITH MORE TIME:
+- Use a real Instagram API (if one becomes available)
+- Add proxy rotation to avoid IP-based rate limiting
+- More sophisticated lead scoring (ML model instead of simple AI prompt)
+- Email finder integration for discovered leads
+- Export to CRM tools (HubSpot, Salesforce)
+- Scheduled automatic re-scans
+
+--------------------------------------------------------------------------------
+SECTION 8: KEY CONCEPTS LEARNED
+--------------------------------------------------------------------------------
+
+1. DISTRIBUTED JOB QUEUES
+   BullMQ is the backbone of this project. Understanding job queues means
+   understanding: retries, concurrency, job IDs, deduplication, stalled jobs,
+   lock duration, and the difference between "failed" and "completed" states.
+
+2. REDIS AS MORE THAN A CACHE
+   Redis is used for two things here: BullMQ job storage AND Pub/Sub messaging.
+   Redis Pub/Sub is a messaging pattern where publishers send to channels and
+   subscribers receive from channels — neither knows about the other.
+
+3. PLAYWRIGHT AND BROWSER AUTOMATION
+   Playwright controls a real browser. Instagram loads content with JavaScript,
+   so you can't just HTTP GET the HTML — you need a browser to execute the JS
+   and build the DOM first. Stealth mode, cookie injection, and scroll simulation
+   are all part of making automation look human.
+
+4. THE DANGER OF SILENT FAILURES
+   Multiple bugs were caused by failures that happened silently:
+   - BullMQ dropping duplicate job IDs (no error thrown)
+   - Mongoose ignoring enum violations (no error thrown)
+   - BullMQ killing jobs at timeout before catch blocks can run
+   - OpenRouter 402s only visible in failed job list, not in UI
+
+   In distributed systems, you have to actively instrument for failures.
+   Don't assume that if nothing crashed, everything worked.
+
+5. STATE MACHINE CORRECTNESS
+   The DiscoverySession has a state machine:
+     running → completed / failed / cancelled / paused / already_scanned
+
+   If any event handler emits the wrong event type (like "comment_analyzed"
+   when it should be "comment_error"), the state machine gets corrupted and
+   all subsequent jobs behave incorrectly. State machine correctness is
+   critical in any event-driven system.
+
+6. SAVE FIRST, ENRICH LATER
+   The lead loss bug taught a fundamental lesson: never make saving important
+   data conditional on a heavy or unreliable operation. Save the minimum
+   viable record immediately. Run enrichment as a separate, non-critical step.
+
+7. SCOPE JOB IDs CORRECTLY
+   BullMQ deduplication is powerful but requires careful thought about ID scope.
+   Ask: "What is the unit of uniqueness?" In this case, uniqueness is per session,
+   not per post globally.
+
+--------------------------------------------------------------------------------
+SECTION 9: PROJECT STATS
+--------------------------------------------------------------------------------
+
+Files: ~85 TypeScript source files
+Lines of code: ~8,000+ (estimated)
+Workers: 9 background worker processes
+Queues: 9 BullMQ queues
+Models: 15 MongoDB collections
+API routes: ~40 endpoints
+Commits: 100+ commits over the development period
+Bugs fixed in final session: 7 major bugs
+
+--------------------------------------------------------------------------------
+SECTION 10: HOW TO EXPLAIN THIS IN AN INTERVIEW
+--------------------------------------------------------------------------------
+
+"What is NicheScope?"
+  It's an automated Instagram lead generation engine. You give it seed
+  influencer accounts in a niche, and it crawls their comment sections using
+  AI to identify people who are expressing buying intent — then saves them
+  as qualified leads in a database with a real-time dashboard.
+
+"What was the hardest technical challenge?"
+  The most interesting was diagnosing why 115 leads were flagged by AI but
+  only 3 were saved. I traced it by querying queue depths directly in code,
+  found that 359 AI jobs had failed silently with 402 errors, then found that
+  even after fixing the AI provider, leads still weren't saving because BullMQ
+  was killing profile scrape jobs at the 90-second timeout boundary — before
+  the catch block could run to save the record. The fix was to save leads
+  immediately when AI detects them, and treat profile scraping as optional
+  enrichment.
+
+"Why BullMQ instead of just making API calls?"
+  Each stage of the pipeline can take anywhere from 5 seconds to 3 minutes.
+  Doing it synchronously inside an HTTP request would time out. And if one
+  stage fails, you'd lose all the work done so far. With BullMQ, each unit
+  of work is persisted in Redis, workers are independent, failures retry
+  automatically, and you can control concurrency to prevent overloading
+  the Instagram scraper.
+
+"What did you learn from the BullMQ deduplication bug?"
+  That BullMQ's job deduplication is aggressive and silent — there's no error
+  when a duplicate is dropped. And since completed jobs are retained for 24
+  hours by default, any static job ID will block re-processing for 24 hours.
+  The fix was to scope job IDs to the session, not globally. Now each scan
+  generates unique IDs.
+
+"Why use Playwright instead of the Instagram API?"
+  Instagram's public API has been shut down since 2018. The only way to read
+  Instagram data is to drive a real browser. Playwright controls Chromium,
+  loads the page like a real user would, and extracts data from the rendered
+  DOM. Cookie injection keeps the session alive without re-logging in each time.
+
+--------------------------------------------------------------------------------
+END OF DOCUMENT
+================================================================================

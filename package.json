@@ -1,8 +1,24 @@
 {
   "name": "nichescope",
+  "version": "0.1.0",
   "module": "src/index.ts",
   "type": "module",
   "private": true,
+  "description": "Discover qualified Instagram leads from influencer comments with Playwright, queues, and AI.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/suryansh2846code/Nichescope.git"
+  },
+  "keywords": [
+    "lead-generation",
+    "instagram",
+    "playwright",
+    "bullmq",
+    "typescript",
+    "llm",
+    "crm"
+  ],
+  "license": "MIT",
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
